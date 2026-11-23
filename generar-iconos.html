@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+
+<body>
+    <p>Haz clic en los botones para descargar tus íconos PNG exactos:</p>
+    <button onclick="descargarPNG(192)">Descargar icon-192.png</button>
+    <button onclick="descargarPNG(512)">Descargar icon-512.png</button>
+    <script>
+        function descargarPNG(size) {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, size, size);
+                const a = document.createElement('a');
+                a.download = `icon-${size}.png`;
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            img.src = './icons/icon.svg';
+        }
+    </script>
+</body>
+
+</html>
