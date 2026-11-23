@@ -8,15 +8,11 @@ export class DualScanner {
         this.lastScannedCode = null;
         this.lastScanTime = 0;
 
-        // Buffer para lectura por pistola USB/Bluetooth en PC
         this.usbBuffer = '';
         this.lastKeyTime = 0;
         this.handleKeyDown = this.handleKeyDown.bind(this);
     }
 
-    // -------------------------------------------------------------------------
-    // 1. MODO PISTOLA LÁSER (PC / ESCRITORIO)
-    // -------------------------------------------------------------------------
     enableUsbScanner() {
         window.addEventListener('keydown', this.handleKeyDown);
     }
@@ -26,12 +22,10 @@ export class DualScanner {
     }
 
     handleKeyDown(e) {
-        // Ignorar si el usuario está escribiendo dentro de un input, textarea o select
         const tag = e.target.tagName.toLowerCase();
         if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
         const now = Date.now();
-        // Las pistolas láser envían caracteres con menos de 50ms de diferencia
         if (now - this.lastKeyTime > 80) {
             this.usbBuffer = '';
         }
@@ -49,9 +43,6 @@ export class DualScanner {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // 2. MODO CÁMARA (MÓVIL / TABLET)
-    // -------------------------------------------------------------------------
     async startCamera(elementId = 'reader') {
         if (this.isCameraRunning) return;
 
@@ -71,9 +62,7 @@ export class DualScanner {
                 (decodedText) => {
                     this.handleCameraDetection(decodedText);
                 },
-                () => {
-                    // Errores de frame sin código detectado (se ignoran para no saturar consola)
-                }
+                () => {}
             );
 
             this.isCameraRunning = true;
@@ -98,7 +87,6 @@ export class DualScanner {
 
     handleCameraDetection(code) {
         const now = Date.now();
-        // Evitar disparar 10 veces seguidas mientras el usuario retira el frasco
         if (code === this.lastScannedCode && now - this.lastScanTime < 2200) {
             return;
         }
@@ -108,16 +96,11 @@ export class DualScanner {
         this.triggerSuccess(code.trim(), 'CAMARA');
     }
 
-    // -------------------------------------------------------------------------
-    // 3. FEEDBACK SENSORIAL Y NOTIFICACIÓN
-    // -------------------------------------------------------------------------
     triggerSuccess(code, source) {
-        // Vibración en móvil
         if (navigator.vibrate) {
             navigator.vibrate(100);
         }
 
-        // Beep corto estilo escáner de punto de venta
         this.playBeep();
 
         if (typeof this.onScan === 'function') {
@@ -137,8 +120,6 @@ export class DualScanner {
             gain.connect(ctx.destination);
             osc.start();
             osc.stop(ctx.currentTime + 0.08);
-        } catch (_) {
-            // Ignorar si el navegador bloquea audio sin interacción previa
-        }
+        } catch (_) {}
     }
 }

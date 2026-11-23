@@ -12,19 +12,20 @@ import { DualScanner } from './scanner.js';
 import {
     cargarColaOffline,
     sincronizarColaOffline,
+    generarCodigoInterno,
     buscarProductoPorCodigo,
+    buscarProductosPorNombre,
     registrarEntradaCompleta,
     registrarSalidaOMerma,
     obtenerExistenciasRancho,
+    obtenerAlertasRancho,
     obtenerMovimientosPendientes,
     marcarMovimientosExportados
 } from './inventory.js';
+import { mostrarToast } from './ui.js';
 
 let scanner = null;
 
-// ============================================================================
-// INICIALIZACIÓN Y MONITOREO DE RED
-// ============================================================================
 document.addEventListener('DOMContentLoaded', async() => {
     cargarColaOffline();
     configurarListenersRed();
@@ -45,13 +46,15 @@ function configurarListenersRed() {
 
     window.addEventListener('offline', () => {
         state.isOnline = false;
+        mostrarToast('Modo sin conexión activado', 'warning');
     });
 }
 
 async function intentarSincronizarOffline() {
     const subidos = await sincronizarColaOffline();
     if (subidos > 0) {
-        alert(`Conexión recuperada: se sincronizaron ${subidos} movimiento(s) pendientes.`);
+        mostrarToast(`Se sincronizaron ${subidos} movimiento(s) pendientes.`, 'success');
+        await actualizarContadorAlertas();
         if (state.activeView === 'existencias') renderVistaExistencias(document.getElementById('view-container'));
         if (state.activeView === 'sincronizacion') renderVistaSincronizacion(document.getElementById('view-container'));
     }
@@ -83,7 +86,7 @@ async function inicializarLogin() {
     });
 }
 
-function mostrarApp(sesion) {
+async function mostrarApp(sesion) {
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app-shell').classList.remove('hidden');
 
@@ -111,12 +114,30 @@ function mostrarApp(sesion) {
     scanner = new DualScanner((codigo) => procesarCodigoEscaneado(codigo));
     scanner.enableUsbScanner();
 
+    await actualizarContadorAlertas();
     cambiarVista('escaner');
 }
 
-// ============================================================================
-// NAVEGACIÓN ENTRE VISTAS
-// ============================================================================
+async function actualizarContadorAlertas() {
+    try {
+        const { bajoStock, caducidades } = await obtenerAlertasRancho(state.activeRanchId);
+        const total = bajoStock.length + caducidades.length;
+
+        ['badge-alertas-pc', 'badge-alertas-mob'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (total > 0) {
+                el.textContent = total;
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+            }
+        });
+    } catch (e) {
+        console.warn('No se pudo actualizar contador de alertas:', e);
+    }
+}
+
 async function cambiarVista(vista) {
     state.activeView = vista;
 
@@ -134,11 +155,12 @@ async function cambiarVista(vista) {
     if (vista === 'escaner') renderVistaEscaner(container);
     if (vista === 'existencias') renderVistaExistencias(container);
     if (vista === 'catalogo') renderFormularioAltaOEntrada(container, '');
+    if (vista === 'alertas') renderVistaAlertas(container);
     if (vista === 'sincronizacion') renderVistaSincronizacion(container);
 }
 
 // ============================================================================
-// VISTA 1: ESCÁNER Y MOVIMIENTOS RÁPIDOS
+// VISTA 1: ESCÁNER Y BÚSQUEDA POR NOMBRE/PRINCIPIO ACTIVO
 // ============================================================================
 function renderVistaEscaner(container) {
     container.innerHTML = `
@@ -156,19 +178,20 @@ function renderVistaEscaner(container) {
             Cámara en espera (en PC usa tu pistola láser directo)
           </div>
 
-          <form id="form-manual-code" class="mt-4 flex gap-2">
-            <input id="input-manual-code" type="text" placeholder="Escribe o escanea código..." 
+          <form id="form-buscar-nombre" class="mt-4 flex gap-2">
+            <input id="input-buscar-nombre" type="text" placeholder="Buscar producto por nombre o principio activo..." 
               class="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-600 focus:outline-none" />
             <button type="submit" class="bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-medium">
               Buscar
             </button>
           </form>
+          <div id="search-suggestions" class="mt-2 space-y-1"></div>
         </div>
       </div>
 
       <div id="scan-result-panel" class="lg:col-span-7">
         <div class="bg-white p-8 rounded-2xl border border-dashed border-slate-300 text-center text-slate-400">
-          Escanea un medicamento o insumo para consultar lotes o registrar movimientos.
+          Escanea un código de barras con la cámara o pistola láser, o búscalo por nombre para consultar lotes.
         </div>
       </div>
     </div>
@@ -186,15 +209,44 @@ function renderVistaEscaner(container) {
                 btnCam.textContent = 'Detener Cámara';
                 btnCam.classList.replace('bg-emerald-600', 'bg-red-600');
             } catch (err) {
-                alert(err.message);
+                mostrarToast(err.message, 'error');
             }
         }
     });
 
-    document.getElementById('form-manual-code').addEventListener('submit', (e) => {
+    document.getElementById('form-buscar-nombre').addEventListener('submit', async(e) => {
         e.preventDefault();
-        const val = document.getElementById('input-manual-code').value.trim();
-        if (val) procesarCodigoEscaneado(val);
+        const val = document.getElementById('input-buscar-nombre').value.trim();
+        if (!val) return;
+
+        const sugerenciasBox = document.getElementById('search-suggestions');
+        const coincidencias = await buscarProductosPorNombre(val);
+
+        if (coincidencias.length === 1) {
+            sugerenciasBox.innerHTML = '';
+            procesarCodigoEscaneado(coincidencias[0].codigo_barras);
+        } else if (coincidencias.length > 1) {
+            sugerenciasBox.innerHTML = coincidencias
+                .map(
+                    (p) => `
+          <button type="button" data-code="${p.codigo_barras}"
+            class="btn-sugerencia w-full text-left px-3 py-2 rounded-lg bg-slate-50 hover:bg-emerald-50 border border-slate-200 text-xs flex justify-between">
+            <span class="font-semibold text-slate-800">${p.nombre}</span>
+            <span class="font-mono text-slate-500">${p.codigo_barras}</span>
+          </button>`
+                )
+                .join('');
+
+            document.querySelectorAll('.btn-sugerencia').forEach((b) => {
+                b.addEventListener('click', () => {
+                    sugerenciasBox.innerHTML = '';
+                    procesarCodigoEscaneado(b.dataset.code);
+                });
+            });
+        } else {
+            sugerenciasBox.innerHTML = '';
+            mostrarToast('No se encontró ningún producto con ese nombre. Si es nuevo, regístralo en Alta.', 'warning');
+        }
     });
 }
 
@@ -270,7 +322,7 @@ async function procesarCodigoEscaneado(codigo) {
         ${
           stockBajo
             ? `<div class="bg-red-50 border border-red-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span class="text-xs font-semibold text-red-700">⚠️ Stock en nivel mínimo (${producto.stock_minimo} ${producto.unidad_medida})</span>
+                <span class="text-xs font-semibold text-red-700">⚠️ Stock en nivel mínimo (${producto.stock_minimo}${producto.unidad_medida})</span>
                 <a href="${whatsappUrl}" target="_blank" rel="noopener"
                   class="inline-flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
                   📲 Pedir a ${COMPRAS_WHATSAPP.nombre}
@@ -348,13 +400,14 @@ async function procesarCodigoEscaneado(codigo) {
         });
 
         if (res.offline) {
-          alert('Sin conexión: movimiento guardado localmente y se enviará al recuperar señal.');
+          mostrarToast('Guardado offline. Se enviará al recuperar señal.', 'warning');
         } else {
-          alert('Movimiento registrado correctamente.');
+          mostrarToast('Salida registrada correctamente.', 'success');
+          await actualizarContadorAlertas();
           procesarCodigoEscaneado(producto.codigo_barras);
         }
       } catch (err) {
-        alert('Error: ' + err.message);
+        mostrarToast(err.message, 'error');
       }
     });
 
@@ -367,40 +420,61 @@ async function procesarCodigoEscaneado(codigo) {
 }
 
 // ============================================================================
-// VISTA 2: ALTA DE PRODUCTO Y ENTRADA DE LOTE
+// VISTA 2: ALTA DE PRODUCTO (CÓDIGO AUTOMÁTICO BLOQUEADO + ETIQUETA)
 // ============================================================================
 function renderFormularioAltaOEntrada(container, codigoPrecargado = '', productoExistente = null) {
+  const esAltaSinEscaneo = !codigoPrecargado && !productoExistente;
+  const codigoInicial = codigoPrecargado || generarCodigoInterno();
+
+  const nombreVal = productoExistente ? productoExistente.nombre : '';
+  const principioVal = productoExistente && productoExistente.principio_activo ? productoExistente.principio_activo : '';
+  const catActual = productoExistente ? productoExistente.categoria : '';
+  const uniActual = productoExistente ? productoExistente.unidad_medida : '';
+  const minActual = productoExistente && productoExistente.stock_minimo !== undefined ? productoExistente.stock_minimo : 2;
+
   const opcionesCategorias = CATEGORIAS_ALMACEN.map(
-    (c) => `<option value="${c.code}" ${productoExistente?.categoria === c.code ? 'selected' : ''}>${c.label}</option>`
+    (c) => `<option value="${c.code}" ${catActual === c.code ? 'selected' : ''}>${c.label}</option>`
   ).join('');
 
   const opcionesUnidades = UNIDADES_MEDIDA.map(
-    (u) => `<option value="${u}" ${productoExistente?.unidad_medida === u ? 'selected' : ''}>${u}</option>`
+    (u) => `<option value="${u}" ${uniActual === u ? 'selected' : ''}>${u}</option>`
   ).join('');
 
   container.innerHTML = `
     <form id="form-alta-entrada" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
-      <h3 class="font-bold text-lg text-slate-800">
-        ${productoExistente ? `Registrar Entrada: ${productoExistente.nombre}` : 'Alta de Producto y Entrada'}
-      </h3>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="font-bold text-lg text-slate-800">
+          ${productoExistente ? `Registrar Entrada: ${productoExistente.nombre}` : 'Alta de Producto y Entrada'}
+        </h3>
+        <span class="text-xs ${esAltaSinEscaneo ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'} px-2.5 py-1 rounded-full font-semibold">
+          ${esAltaSinEscaneo ? 'Código generado automáticamente por el sistema' : 'Código capturado por escáner'}
+        </span>
+      </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Código de Barras *</label>
-          <input id="alta-codigo" type="text" required value="${codigoPrecargado}" ${productoExistente ? 'readonly' : ''}
-            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm bg-slate-50" />
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Código Asignado (Automático / Escáner)</label>
+          <input id="alta-codigo" type="text" required readonly value="${codigoInicial}"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono bg-slate-100 text-slate-700 cursor-not-allowed" />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Nombre Comercial *</label>
-          <input id="alta-nombre" type="text" required value="${productoExistente?.nombre || ''}" ${productoExistente ? 'readonly' : ''}
+          <input id="alta-nombre" type="text" required value="${nombreVal}" ${productoExistente ? 'readonly' : ''}
             class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
         </div>
+      </div>
+
+      <div id="barcode-preview-box" class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <svg id="barcode-svg" class="max-h-16"></svg>
+        <button type="button" id="btn-imprimir-etiqueta" class="text-xs bg-slate-800 text-white px-3 py-2 rounded-lg font-medium">
+          🖨️ Imprimir / Guardar Etiqueta
+        </button>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Principio Activo</label>
-          <input id="alta-principio" type="text" value="${productoExistente?.principio_activo || ''}"
+          <input id="alta-principio" type="text" value="${principioVal}"
             class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
         </div>
         <div>
@@ -435,7 +509,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Stock Mínimo</label>
-          <input id="alta-minimo" type="number" step="0.01" min="0" value="${productoExistente?.stock_minimo ?? 2}"
+          <input id="alta-minimo" type="number" step="0.01" min="0" value="${minActual}"
             class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
         </div>
         <div>
@@ -451,12 +525,40 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
     </form>
   `;
 
+  if (window.JsBarcode && codigoInicial) {
+    try {
+      window.JsBarcode('#barcode-svg', codigoInicial, {
+        format: 'CODE128',
+        width: 2,
+        height: 45,
+        displayValue: true,
+        fontSize: 13,
+        margin: 4
+      });
+    } catch (e) {
+      console.warn('Código no válido para barra:', e);
+    }
+  }
+
+  document.getElementById('btn-imprimir-etiqueta').addEventListener('click', () => {
+    const svgHtml = document.getElementById('barcode-svg').outerHTML;
+    const nombreProd = document.getElementById('alta-nombre').value.trim() || 'Producto VetAlmacén';
+    const win = window.open('', '_blank', 'width=400,height=300');
+    win.document.write(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:20px;">
+        <div style="font-weight:bold;font-size:14px;margin-bottom:6px;">${nombreProd}</div>
+        ${svgHtml}
+        <script>window.onload = () => { window.print(); window.close(); };<\/script>
+      </body></html>
+    `);
+    win.document.close();
+  });
+
   document.getElementById('form-alta-entrada').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const codigo = document.getElementById('alta-codigo').value.trim();
     try {
       const res = await registrarEntradaCompleta({
-        codigo_barras: codigo,
+        codigo_barras: codigoInicial,
         nombre: document.getElementById('alta-nombre').value.trim(),
         principio_activo: document.getElementById('alta-principio').value.trim(),
         categoria: document.getElementById('alta-categoria').value,
@@ -471,13 +573,14 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
       });
 
       if (res.offline) {
-        alert('Sin conexión: entrada guardada en cola offline.');
+        mostrarToast('Guardado offline. Se subirá al recuperar red.', 'warning');
       } else {
-        alert('Entrada registrada exitosamente.');
-        procesarCodigoEscaneado(codigo);
+        mostrarToast('Entrada registrada exitosamente.', 'success');
+        await actualizarContadorAlertas();
+        procesarCodigoEscaneado(codigoInicial);
       }
     } catch (err) {
-      alert('Error al guardar: ' + err.message);
+      mostrarToast(err.message, 'error');
     }
   });
 }
@@ -498,6 +601,7 @@ async function renderVistaExistencias(container) {
   const hoy = new Date();
   const filas = lotes
     .map((l) => {
+      const prod = l.productos_almacen || {};
       let badgeCaducidad = `<span class="text-slate-500">${l.fecha_caducidad || 'Sin caducidad'}</span>`;
       if (l.fecha_caducidad) {
         const dias = Math.ceil((new Date(l.fecha_caducidad) - hoy) / (1000 * 60 * 60 * 24));
@@ -512,12 +616,12 @@ async function renderVistaExistencias(container) {
         <tr class="border-b border-slate-100 hover:bg-slate-50">
           <td class="py-3 px-4 font-mono text-xs">${l.codigo_barras}</td>
           <td class="py-3 px-4">
-            <div class="font-semibold text-slate-800">${l.productos_almacen?.nombre}</div>
-            <div class="text-xs text-slate-400">${l.productos_almacen?.principio_activo || ''}</div>
+            <div class="font-semibold text-slate-800">${prod.nombre || ''}</div>
+            <div class="text-xs text-slate-400">${prod.principio_activo || ''}</div>
           </td>
           <td class="py-3 px-4 text-xs">${l.numero_lote}</td>
           <td class="py-3 px-4 text-xs">${badgeCaducidad}</td>
-          <td class="py-3 px-4 font-bold text-emerald-700">${l.existencia_actual} ${l.productos_almacen?.unidad_medida}</td>
+          <td class="py-3 px-4 font-bold text-emerald-700">${l.existencia_actual} ${prod.unidad_medida || ''}</td>
         </tr>
       `;
     })
@@ -548,7 +652,104 @@ async function renderVistaExistencias(container) {
 }
 
 // ============================================================================
-// VISTA 4: EXPORTACIÓN CSV (FASE 2) Y COLA OFFLINE
+// VISTA 4: ALERTAS DE BAJO STOCK Y CADUCIDADES
+// ============================================================================
+async function renderVistaAlertas(container) {
+  container.innerHTML = `<p class="text-slate-500 text-sm">Analizando existencias y caducidades...</p>`;
+  const { bajoStock, caducidades } = await obtenerAlertasRancho(state.activeRanchId);
+  const ranchoNombre = RANCH_NAMES[state.activeRanchId] || state.activeRanchId;
+
+  const lineasWhatsapp = [
+    `*REPORTE DE FALTANTES - VETALMACÉN*`,
+    `*Rancho:* ${ranchoNombre}`,
+    `*Fecha:* ${new Date().toLocaleDateString('es-MX')}`,
+    `---------------------------`,
+    ...bajoStock.map(
+      (p) => `• *${p.nombre}* (${p.codigo_barras}): Quedan *${p.stock_total}* ${p.unidad_medida} (Mín: ${p.stock_minimo})`
+    )
+  ];
+  const urlWhatsappMasivo = `https://wa.me/${COMPRAS_WHATSAPP.phone}?text=${encodeURIComponent(lineasWhatsapp.join('\n'))}`;
+
+  const htmlBajoStock = bajoStock.length
+    ? bajoStock
+        .map(
+          (p) => `
+          <div class="p-3.5 border border-red-200 bg-red-50/60 rounded-xl flex items-center justify-between gap-3">
+            <div>
+              <div class="font-bold text-slate-900 text-sm">${p.nombre}</div>
+              <div class="text-xs text-slate-500 font-mono">${p.codigo_barras} • Mínimo: ${p.stock_minimo} ${p.unidad_medida}</div>
+            </div>
+            <div class="text-right">
+              <span class="text-base font-extrabold text-red-600">${p.stock_total} ${p.unidad_medida}</span>
+              <button data-code="${p.codigo_barras}" class="btn-ir-producto block text-xs text-emerald-700 font-semibold hover:underline mt-0.5">
+                + Surtir
+              </button>
+            </div>
+          </div>`
+        )
+        .join('')
+    : `<p class="text-sm text-slate-400">Todo el catálogo está por encima del stock mínimo.</p>`;
+
+  const htmlCaducidades = caducidades.length
+    ? caducidades
+        .map((l) => {
+          const vencido = l.dias_restantes < 0;
+          return `
+            <div class="p-3.5 border ${vencido ? 'border-red-300 bg-red-50' : 'border-amber-200 bg-amber-50/60'} rounded-xl flex items-center justify-between gap-3">
+              <div>
+                <div class="font-bold text-slate-900 text-sm">${l.nombre_producto}</div>
+                <div class="text-xs text-slate-600">Lote: <b>${l.numero_lote}</b> • Existencia: ${l.existencia_actual} ${l.unidad_medida}</div>
+              </div>
+              <div class="text-right">
+                <span class="text-xs font-bold px-2.5 py-1 rounded-full ${vencido ? 'bg-red-600 text-white' : 'bg-amber-500 text-slate-900'}">
+                  ${vencido ? `Vencido (${l.fecha_caducidad})` : `Vence en ${l.dias_restantes} d (${l.fecha_caducidad})`}
+                </span>
+                <button data-code="${l.codigo_barras}" class="btn-ir-producto block ml-auto text-xs text-slate-700 font-semibold hover:underline mt-1">
+                  Dar salida / merma
+                </button>
+              </div>
+            </div>`;
+        })
+        .join('')
+    : `<p class="text-sm text-slate-400">No hay lotes vencidos ni próximos a caducar en los próximos 30 días.</p>`;
+
+  container.innerHTML = `
+    <div class="space-y-6">
+      <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h2 class="font-bold text-lg text-slate-800">🚨 Productos con Bajo Stock — ${ranchoNombre}</h2>
+            <p class="text-xs text-slate-500">Artículos en nivel mínimo o agotados.</p>
+          </div>
+          ${
+            bajoStock.length
+              ? `<a href="${urlWhatsappMasivo}" target="_blank" rel="noopener"
+                  class="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl">
+                  📲 Enviar lista completa a ${COMPRAS_WHATSAPP.nombre}
+                </a>`
+              : ''
+          }
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${htmlBajoStock}</div>
+      </div>
+
+      <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+        <div class="border-b border-slate-100 pb-3">
+          <h2 class="font-bold text-lg text-slate-800">⏳ Alertas de Caducidad (Próximos 30 días)</h2>
+          <p class="text-xs text-slate-500">Lotes prioritarios para usar o dar de baja por merma.</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${htmlCaducidades}</div>
+      </div>
+    </div>
+  `;
+
+  container.querySelectorAll('.btn-ir-producto').forEach((btn) => {
+    btn.addEventListener('click', () => procesarCodigoEscaneado(btn.dataset.code));
+  });
+}
+
+// ============================================================================
+// VISTA 5: EXPORTACIÓN CSV (FASE 2) Y COLA OFFLINE
 // ============================================================================
 async function renderVistaSincronizacion(container) {
   const pendientes = await obtenerMovimientosPendientes(state.activeRanchId);
@@ -579,33 +780,44 @@ async function renderVistaSincronizacion(container) {
     </div>
   `;
 
-  document.getElementById('btn-sync-offline-now')?.addEventListener('click', intentarSincronizarOffline);
+  const btnSync = document.getElementById('btn-sync-offline-now');
+  if (btnSync) {
+    btnSync.addEventListener('click', intentarSincronizarOffline);
+  }
 
-  document.getElementById('btn-exportar-csv')?.addEventListener('click', async () => {
-    const encabezados = ['ID_MOV', 'RANCHO', 'FECHA', 'TIPO', 'CODIGO_BARRAS', 'PRODUCTO', 'LOTE', 'CADUCIDAD', 'CANTIDAD', 'DESTINO', 'USUARIO'];
-    const lineas = pendientes.map((m) => [
-      m.id_movimiento,
-      state.activeRanchId,
-      m.fecha_movimiento,
-      m.tipo_movimiento,
-      m.codigo_barras,
-      `"${m.productos_almacen?.nombre || ''}"`,
-      m.inventario_lotes?.numero_lote || '',
-      m.inventario_lotes?.fecha_caducidad || '',
-      m.cantidad,
-      `"${m.motivo_destino || ''}"`,
-      m.id_usuario
-    ].join(','));
+  const btnExportar = document.getElementById('btn-exportar-csv');
+  if (btnExportar) {
+    btnExportar.addEventListener('click', async () => {
+      const encabezados = ['ID_MOV', 'RANCHO', 'FECHA', 'TIPO', 'CODIGO_BARRAS', 'PRODUCTO', 'LOTE', 'CADUCIDAD', 'CANTIDAD', 'DESTINO', 'USUARIO'];
+      const lineas = pendientes.map((m) => {
+        const prod = m.productos_almacen || {};
+        const lote = m.inventario_lotes || {};
+        return [
+          m.id_movimiento,
+          state.activeRanchId,
+          m.fecha_movimiento,
+          m.tipo_movimiento,
+          m.codigo_barras,
+          `"${prod.nombre || ''}"`,
+          lote.numero_lote || '',
+          lote.fecha_caducidad || '',
+          m.cantidad,
+          `"${m.motivo_destino || ''}"`,
+          m.id_usuario
+        ].join(',');
+      });
 
-    const csv = '\uFEFF' + [encabezados.join(','), ...lineas].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `VetAlmacen_${state.activeRanchId}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+      const csv = '\uFEFF' + [encabezados.join(','), ...lineas].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `VetAlmacen_${state.activeRanchId}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
 
-    await marcarMovimientosExportados(pendientes.map((m) => m.id_movimiento));
-    renderVistaSincronizacion(container);
-  });
+      await marcarMovimientosExportados(pendientes.map((m) => m.id_movimiento));
+      mostrarToast('CSV exportado y movimientos marcados.', 'success');
+      renderVistaSincronizacion(container);
+    });
+  }
 }

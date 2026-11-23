@@ -1,6 +1,5 @@
 // js/ui.js
 
-// Muestra una notificación flotante elegante en lugar de usar alert()
 export function mostrarToast(mensaje, tipo = 'success') {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -27,12 +26,4 @@ export function mostrarToast(mensaje, tipo = 'success') {
         toast.classList.add('opacity-0', '-translate-y-2');
         setTimeout(() => toast.remove(), 300);
     }, 3200);
-}
-
-// Formatea fechas YYYY-MM-DD a formato legible local (ej. 23 Nov 2026)
-export function formatearFecha(fechaStr) {
-    if (!fechaStr) return 'Sin caducidad';
-    const [year, month, day] = fechaStr.split('-');
-    const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-    return `${day} ${meses[parseInt(month, 10) - 1]} ${year}`;
 }

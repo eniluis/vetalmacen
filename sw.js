@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vetalmacen-v2';
+const CACHE_NAME = 'vetalmacen-v5';
 const ASSETS = [
     './',
     './index.html',
@@ -31,7 +31,6 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-    // No cachear peticiones a la API de Supabase para tener siempre stock real
     if (event.request.url.includes('supabase.co')) return;
 
     event.respondWith(

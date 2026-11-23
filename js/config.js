@@ -4,13 +4,11 @@ export const SUPABASE_KEY = 'sb_publishable_1PeWHaPebHs1e_vqsqr6Fw_KvQjSl-e';
 
 export const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Teléfonos de notificación rápida (WhatsApp)
 export const COMPRAS_WHATSAPP = {
     nombre: 'Compras Matanuzka',
     phone: '5214589890015'
 };
 
-// Catálogo maestro de ranchos (homologado con tabla public.ranchos)
 export const RANCH_NAMES = {
     EDEN: 'El Edén',
     MATANUZKA: 'Matanuzka',
@@ -18,11 +16,9 @@ export const RANCH_NAMES = {
     ARADOS: 'Arados'
 };
 
-// Llaves de almacenamiento local (versionadas para no colisionar con AgroFleet)
 export const OFFLINE_QUEUE_KEY = 'vetalmacen_offline_queue_v1';
 export const SESSION_KEY = 'vetalmacen_user_session_v1';
 
-// Catálogos operativos de Farmacia y Almacén
 export const CATEGORIAS_ALMACEN = [
     { code: 'ANTIBIOTICOS', label: '💉 Antibióticos', area: 'FARMACIA' },
     { code: 'DESPARASITANTES', label: '🧪 Desparasitantes', area: 'FARMACIA' },
@@ -61,7 +57,6 @@ export const UNIDADES_MEDIDA = [
     'Kilogramo'
 ];
 
-// Estado compartido entre módulos de VetAlmacén
 export const state = {
     currentUser: null,
     activeRanchId: 'EDEN',

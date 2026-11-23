@@ -6,25 +6,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#059669" />
     <title>VetAlmacén</title>
-    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
-    <link rel="apple-touch-icon" href="./icons/icon.svg" />
     <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Librería de escaneo por cámara -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <!-- Generador visual de códigos de barras -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <!-- Cliente Supabase -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body class="bg-slate-100 text-slate-800 antialiased select-none md:select-auto">
 
-    <!-- PANTALLA DE LOGIN POR PIN (Misma tabla usuarios_roles) -->
+    <!-- PANTALLA DE LOGIN POR PIN -->
     <div id="login-screen" class="min-h-screen flex items-center justify-center p-4 bg-slate-900">
         <div class="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 space-y-5">
             <div class="text-center">
-                <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 font-bold text-2xl mb-2">
-                    <img src="./icons/icon.svg" alt="VetAlmacén" class="w-16 h-16 mx-auto mb-2 rounded-2xl shadow-md" />
-                </div>
+                <img src="./icons/icon.svg" alt="VetAlmacén" class="w-16 h-16 mx-auto mb-2 rounded-2xl shadow-md" />
                 <h1 class="text-2xl font-bold text-slate-900">VetAlmacén</h1>
                 <p class="text-sm text-slate-500">Farmacia Veterinaria e Inventario</p>
             </div>
@@ -48,14 +48,14 @@
         </div>
     </div>
 
-    <!-- APLICACIÓN PRINCIPAL (Oculta hasta iniciar sesión) -->
+    <!-- APLICACIÓN PRINCIPAL -->
     <div id="app-shell" class="hidden min-h-screen flex flex-col md:flex-row">
 
-        <!-- SIDEBAR PARA PC (Oculto en móvil) -->
+        <!-- SIDEBAR PARA PC -->
         <aside class="hidden md:flex md:w-64 md:flex-col bg-slate-900 text-white p-4 justify-between">
             <div>
                 <div class="flex items-center gap-3 px-2 py-3 border-b border-slate-800">
-                    <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center font-bold">VA</div>
+                    <img src="./icons/icon.svg" alt="VA" class="w-10 h-10 rounded-xl" />
                     <div>
                         <h2 class="font-bold leading-tight">VetAlmacén</h2>
                         <span id="pc-rancho-badge" class="text-xs text-emerald-400">Rancho</span>
@@ -63,7 +63,7 @@
                 </div>
 
                 <nav class="mt-6 space-y-1">
-                    <button data-view="escaner" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-emerald-600/20 text-emerald-400 font-medium">
+                    <button data-view="escaner" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
             <span>📷</span> Escáner / Movimientos
           </button>
                     <button data-view="existencias" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
@@ -71,6 +71,10 @@
           </button>
                     <button data-view="catalogo" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
             <span>💊</span> Alta / Catálogo
+          </button>
+                    <button data-view="alertas" class="nav-btn w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
+            <span class="flex items-center gap-3"><span>🚨</span> Alertas y Reorden</span>
+            <span id="badge-alertas-pc" class="hidden bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">0</span>
           </button>
                     <button data-view="sincronizacion" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
             <span>🔄</span> Exportar / Sincronizar
@@ -86,11 +90,13 @@
 
         <!-- CONTENIDO PRINCIPAL -->
         <main class="flex-1 flex flex-col pb-20 md:pb-6">
-            <!-- Header superior móvil -->
             <header class="md:hidden bg-slate-900 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-20">
-                <div>
-                    <h1 class="font-bold text-lg leading-none">VetAlmacén</h1>
-                    <span id="mob-rancho-badge" class="text-xs text-emerald-400">Rancho</span>
+                <div class="flex items-center gap-2.5">
+                    <img src="./icons/icon.svg" alt="VA" class="w-8 h-8 rounded-lg" />
+                    <div>
+                        <h1 class="font-bold text-base leading-none">VetAlmacén</h1>
+                        <span id="mob-rancho-badge" class="text-xs text-emerald-400">Rancho</span>
+                    </div>
                 </div>
                 <div class="flex items-center gap-3">
                     <span id="mob-user-name" class="text-xs text-slate-300">Usuario</span>
@@ -98,15 +104,12 @@
                 </div>
             </header>
 
-            <!-- Contenedor dinámico de vistas -->
-            <div id="view-container" class="p-4 md:p-8 max-w-6xl w-full mx-auto">
-                <!-- Aquí js/ui.js inyecta la vista activa -->
-            </div>
+            <div id="view-container" class="p-4 md:p-8 max-w-6xl w-full mx-auto"></div>
         </main>
 
-        <!-- BARRA INFERIOR PARA MÓVIL (Oculta en PC) -->
-        <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-4 py-1.5 z-20">
-            <button data-view="escaner" class="nav-btn flex flex-col items-center py-1 text-emerald-600 font-semibold text-xs">
+        <!-- BARRA INFERIOR PARA MÓVIL -->
+        <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-5 py-1.5 z-20">
+            <button data-view="escaner" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
         <span class="text-xl">📷</span> Escanear
       </button>
             <button data-view="existencias" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
@@ -114,6 +117,10 @@
       </button>
             <button data-view="catalogo" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
         <span class="text-xl">💊</span> Alta
+      </button>
+            <button data-view="alertas" class="nav-btn relative flex flex-col items-center py-1 text-slate-500 text-xs">
+        <span class="text-xl">🚨</span> Alertas
+        <span id="badge-alertas-mob" class="hidden absolute top-0.5 right-2 bg-red-600 text-white text-[10px] font-bold px-1.5 rounded-full">0</span>
       </button>
             <button data-view="sincronizacion" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
         <span class="text-xl">🔄</span> Sync
