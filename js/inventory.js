@@ -300,52 +300,61 @@ export async function actualizarProductoCatalogo(codigoBarras, cambios) {
 // CONSULTAS: EXISTENCIAS, ALERTAS, KARDEX, EXPORTACIÓN Y TABLERO GLOBAL
 // ============================================================================
 export async function obtenerExistenciasRancho(idRancho) {
-    const { data, error } = await supabase
+    const { data: lotes, error: errLotes } = await supabase
         .from('inventario_lotes')
-        .select(`
-            id_lote_interno,
-            codigo_barras,
-            numero_lote,
-            fecha_caducidad,
-            existencia_actual,
-            ubicacion_anaquel,
-            productos_almacen (
-                nombre,
-                principio_activo,
-                categoria,
-                unidad_medida,
-                stock_minimo
-            )
-        `)
+        .select('*')
         .eq('id_rancho', idRancho)
         .gt('existencia_actual', 0)
         .order('fecha_caducidad', { ascending: true });
 
-    if (error) throw error;
-    state.dbLotes = data || [];
+    if (errLotes) throw errLotes;
+
+    const { data: productos, error: errProd } = await supabase
+        .from('productos_almacen')
+        .select('*');
+
+    if (errProd) throw errProd;
+
+    const mapaProd = new Map((productos || []).map((p) => [p.codigo_barras, p]));
+
+    state.dbLotes = (lotes || []).map((l) => ({
+        ...l,
+        productos_almacen: mapaProd.get(l.codigo_barras) || {
+            nombre: l.codigo_barras,
+            principio_activo: '',
+            categoria: 'GENERAL',
+            unidad_medida: 'Pieza',
+            stock_minimo: 0
+        }
+    }));
+
     return state.dbLotes;
 }
 
+// === [CAMBIO 2 en js/inventory.js]: Reemplazar obtenerHistorialKardex (evita fallo de join en Kardex) ===
 export async function obtenerHistorialKardex(idRancho, limite = 120) {
-    const { data, error } = await supabase
+    const { data: movs, error: errMovs } = await supabase
         .from('movimientos_inventario')
-        .select(`
-            id_movimiento,
-            codigo_barras,
-            tipo_movimiento,
-            cantidad,
-            motivo_destino,
-            fecha_movimiento,
-            id_usuario,
-            productos_almacen ( nombre, unidad_medida ),
-            inventario_lotes ( numero_lote )
-        `)
+        .select('*')
         .eq('id_rancho', idRancho)
         .order('fecha_movimiento', { ascending: false })
         .limit(limite);
 
-    if (error) throw error;
-    return data || [];
+    if (errMovs) throw errMovs;
+
+    const [{ data: productos }, { data: lotes }] = await Promise.all([
+        supabase.from('productos_almacen').select('codigo_barras, nombre, unidad_medida'),
+        supabase.from('inventario_lotes').select('id_lote_interno, numero_lote').eq('id_rancho', idRancho)
+    ]);
+
+    const mapaProd = new Map((productos || []).map((p) => [p.codigo_barras, p]));
+    const mapaLote = new Map((lotes || []).map((l) => [l.id_lote_interno, l]));
+
+    return (movs || []).map((m) => ({
+        ...m,
+        productos_almacen: mapaProd.get(m.codigo_barras) || { nombre: m.codigo_barras, unidad_medida: '' },
+        inventario_lotes: mapaLote.get(m.id_lote_interno) || { numero_lote: 'N/A' }
+    }));
 }
 
 export async function obtenerAlertasRancho(idRancho) {

@@ -516,11 +516,12 @@ async function procesarCodigoEscaneado(codigo) {
 }
 
 // ============================================================================
-// VISTA 2: ALTA DE PRODUCTO (SIN INPUT DE CÓDIGO - 100% AUTOMÁTICO / ESCÁNER)
+// VISTA 2: ALTA DE PRODUCTO (CON ALMACÉN DESTINO VISIBLE Y SELECTOR ADMIN)
 // ============================================================================
 function renderFormularioAltaOEntrada(container, codigoPrecargado = '', productoExistente = null) {
     const esAltaSinEscaneo = !codigoPrecargado && !productoExistente;
     const codigoInicial = codigoPrecargado || generarCodigoInterno();
+    const esAdmin = state.currentUser && state.currentUser.rol === 'ADMIN';
 
     const nombreVal = productoExistente ? productoExistente.nombre : '';
     const principioVal = productoExistente && productoExistente.principio_activo ? productoExistente.principio_activo : '';
@@ -536,15 +537,27 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
         (u) => `<option value="${u}" ${uniActual === u ? 'selected' : ''}>${u}</option>`
     ).join('');
 
+    const selectorRanchoAlta = esAdmin
+        ? `<select id="alta-rancho" class="rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-xs font-bold text-emerald-900">
+            ${Object.entries(RANCH_NAMES).map(([k, nom]) => `<option value="${k}" ${state.activeRanchId === k ? 'selected' : ''}>${nom}</option>`).join('')}
+           </select>`
+        : `<span class="font-bold text-emerald-900">${RANCH_NAMES[state.activeRanchId] || state.activeRanchId}</span>`;
+
     container.innerHTML = `
     <form id="form-alta-entrada" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h3 class="font-bold text-lg text-slate-800">
           ${productoExistente ? `Registrar Entrada: ${productoExistente.nombre}` : 'Alta de Producto y Entrada'}
         </h3>
-        <span class="text-xs ${esAltaSinEscaneo ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'} px-2.5 py-1 rounded-full font-semibold">
-          ${esAltaSinEscaneo ? 'Código generado automáticamente' : 'Código leído por escáner'}
-        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-xs">
+            <span class="text-emerald-700">📍 Almacén destino:</span>
+            ${selectorRanchoAlta}
+          </div>
+          <span class="text-xs ${esAltaSinEscaneo ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'} px-2.5 py-1 rounded-full font-semibold">
+            ${esAltaSinEscaneo ? 'Código automático' : 'Código escaneado'}
+          </span>
+        </div>
       </div>
 
       <div id="barcode-preview-box" class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -641,6 +654,10 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
 
     document.getElementById('form-alta-entrada').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const ranchoDestino = document.getElementById('alta-rancho')
+            ? document.getElementById('alta-rancho').value
+            : state.activeRanchId;
+
         try {
             const res = await registrarEntradaCompleta({
                 codigo_barras: codigoInicial,
@@ -649,7 +666,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
                 categoria: document.getElementById('alta-categoria').value,
                 unidad_medida: document.getElementById('alta-unidad').value,
                 stock_minimo: document.getElementById('alta-minimo').value,
-                id_rancho: state.activeRanchId,
+                id_rancho: ranchoDestino,
                 numero_lote: document.getElementById('alta-lote').value.trim(),
                 fecha_caducidad: document.getElementById('alta-caducidad').value || null,
                 ubicacion_anaquel: document.getElementById('alta-anaquel').value.trim(),
@@ -660,7 +677,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
             if (res.offline) {
                 mostrarToast('Guardado offline. Se subirá al recuperar red.', 'warning');
             } else {
-                mostrarToast('Entrada registrada exitosamente.', 'success');
+                mostrarToast(`Entrada registrada en ${RANCH_NAMES[ranchoDestino] || ranchoDestino}.`, 'success');
                 await actualizarContadorAlertas();
                 procesarCodigoEscaneado(codigoInicial);
             }
@@ -675,221 +692,223 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
 // ============================================================================
 async function renderVistaExistencias(container) {
     container.innerHTML = `<p class="text-slate-500 text-sm">Cargando inventario...</p>`;
-    const lotes = await obtenerExistenciasRancho(state.activeRanchId);
     const ranchoNombre = RANCH_NAMES[state.activeRanchId] || state.activeRanchId;
     const esAdmin = state.currentUser && state.currentUser.rol === 'ADMIN';
 
-    if (!lotes.length) {
-        container.innerHTML = `<div class="bg-white p-6 rounded-2xl text-center text-slate-400">No hay existencias registradas en ${ranchoNombre}.</div>`;
-        return;
-    }
+    try {
+        const lotes = await obtenerExistenciasRancho(state.activeRanchId);
 
-    const hoy = new Date();
-    const filas = lotes
-        .map((l) => {
-            const prod = l.productos_almacen || {};
-            let badgeCaducidad = `<span class="text-slate-500">${l.fecha_caducidad || 'Sin caducidad'}</span>`;
-            if (l.fecha_caducidad) {
-                const dias = Math.ceil((new Date(l.fecha_caducidad) - hoy) / (1000 * 60 * 60 * 24));
-                if (dias < 0) {
-                    badgeCaducidad = `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded font-semibold">Vencido (${l.fecha_caducidad})</span>`;
-                } else if (dias <= 30) {
-                    badgeCaducidad = `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">Próx. (${l.fecha_caducidad})</span>`;
+        if (!lotes.length) {
+            container.innerHTML = `<div class="bg-white p-6 rounded-2xl text-center text-slate-400">No hay existencias registradas en ${ranchoNombre}.</div>`;
+            return;
+        }
+
+        const hoy = new Date();
+        const filas = lotes
+            .map((l) => {
+                const prod = l.productos_almacen || {};
+                let badgeCaducidad = `<span class="text-slate-500">${l.fecha_caducidad || 'Sin caducidad'}</span>`;
+                if (l.fecha_caducidad) {
+                    const dias = Math.ceil((new Date(l.fecha_caducidad) - hoy) / (1000 * 60 * 60 * 24));
+                    if (dias < 0) {
+                        badgeCaducidad = `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded font-semibold">Vencido (${l.fecha_caducidad})</span>`;
+                    } else if (dias <= 30) {
+                        badgeCaducidad = `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">Próx. (${l.fecha_caducidad})</span>`;
+                    }
                 }
-            }
 
-            const btnAdminHtml = esAdmin
-                ? `
-                  <button type="button" data-lote-id="${l.id_lote_interno}" data-code="${l.codigo_barras}" data-nombre="${(prod.nombre || '').replace(/"/g, '"')}" data-actual="${l.existencia_actual}"
-                    class="btn-ajustar-lote text-xs bg-amber-100 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded-lg font-semibold">
-                    ⚖️ Ajustar
-                  </button>
-                  <button type="button" data-code="${l.codigo_barras}"
-                    class="btn-editar-prod text-xs bg-slate-200 hover:bg-slate-300 text-slate-800 px-2 py-1 rounded-lg font-semibold">
-                    ✏️ Editar
-                  </button>
-                `
-                : '';
+                const btnAdminHtml = esAdmin
+                    ? `
+                      <button type="button" data-lote-id="${l.id_lote_interno}" data-code="${l.codigo_barras}" data-nombre="${(prod.nombre || '').replace(/"/g, '"')}" data-actual="${l.existencia_actual}"
+                        class="btn-ajustar-lote text-xs bg-amber-100 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded-lg font-semibold">
+                        ⚖️ Ajustar
+                      </button>
+                      <button type="button" data-code="${l.codigo_barras}"
+                        class="btn-editar-prod text-xs bg-slate-200 hover:bg-slate-300 text-slate-800 px-2 py-1 rounded-lg font-semibold">
+                        ✏️ Editar
+                      </button>
+                    `
+                    : '';
 
-            return `
-        <tr class="border-b border-slate-100 hover:bg-slate-50" data-cat="${prod.categoria || ''}">
-          <td class="py-3 px-4 font-mono text-xs">${l.codigo_barras}</td>
-          <td class="py-3 px-4">
-            <div class="font-semibold text-slate-800">${prod.nombre || ''}</div>
-            <div class="text-xs text-slate-400">${prod.principio_activo || ''} ${l.ubicacion_anaquel ? `• 📍 ${l.ubicacion_anaquel}` : ''}</div>
-          </td>
-          <td class="py-3 px-4 text-xs">${l.numero_lote}</td>
-          <td class="py-3 px-4 text-xs">${badgeCaducidad}</td>
-          <td class="py-3 px-4 font-bold text-emerald-700">${l.existencia_actual} ${prod.unidad_medida || ''}</td>
-          <td class="py-3 px-4 text-right whitespace-nowrap space-x-1">
-            <button type="button" data-code="${l.codigo_barras}" data-nombre="${(prod.nombre || '').replace(/"/g, '"')}" data-lote="${l.numero_lote}" data-cad="${l.fecha_caducidad || ''}"
-              class="btn-print-row text-xs bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1 rounded-lg font-medium">
-              🖨️ Etiqueta
-            </button>
-            ${btnAdminHtml}
-          </td>
-        </tr>
-      `;
-        })
-        .join('');
-
-    const opcionesFiltroCat = [
-        `<option value="TODAS">Todas las categorías</option>`,
-        ...CATEGORIAS_ALMACEN.map((c) => `<option value="${c.code}">${c.label}</option>`)
-    ].join('');
-
-    container.innerHTML = `
-    <div id="admin-edit-box" class="mb-4"></div>
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <div class="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-            <h2 class="font-bold text-slate-800">Existencias por Lote — ${ranchoNombre}</h2>
-            <span class="text-xs text-slate-500">${lotes.length} lotes activos</span>
-        </div>
-        <div class="flex flex-wrap gap-2">
-            <input id="filtro-existencias-txt" type="text" placeholder="Buscar producto, lote o anaquel..."
-                class="rounded-xl border border-slate-300 px-3 py-1.5 text-xs focus:border-emerald-600 focus:outline-none" />
-            <select id="filtro-existencias-cat" class="rounded-xl border border-slate-300 px-3 py-1.5 text-xs">
-                ${opcionesFiltroCat}
-            </select>
-        </div>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead class="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr>
-              <th class="py-3 px-4">Código</th>
-              <th class="py-3 px-4">Producto / Ubicación</th>
-              <th class="py-3 px-4">Lote</th>
-              <th class="py-3 px-4">Caducidad</th>
-              <th class="py-3 px-4">Existencia</th>
-              <th class="py-3 px-4 text-right">Acciones</th>
+                return `
+            <tr class="border-b border-slate-100 hover:bg-slate-50" data-cat="${prod.categoria || ''}">
+              <td class="py-3 px-4 font-mono text-xs">${l.codigo_barras}</td>
+              <td class="py-3 px-4">
+                <div class="font-semibold text-slate-800">${prod.nombre || ''}</div>
+                <div class="text-xs text-slate-400">${prod.principio_activo || ''} ${l.ubicacion_anaquel ? `• 📍 ${l.ubicacion_anaquel}` : ''}</div>
+              </td>
+              <td class="py-3 px-4 text-xs">${l.numero_lote}</td>
+              <td class="py-3 px-4 text-xs">${badgeCaducidad}</td>
+              <td class="py-3 px-4 font-bold text-emerald-700">${l.existencia_actual} ${prod.unidad_medida || ''}</td>
+              <td class="py-3 px-4 text-right whitespace-nowrap space-x-1">
+                <button type="button" data-code="${l.codigo_barras}" data-nombre="${(prod.nombre || '').replace(/"/g, '"')}" data-lote="${l.numero_lote}" data-cad="${l.fecha_caducidad || ''}"
+                  class="btn-print-row text-xs bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1 rounded-lg font-medium">
+                  🖨️ Etiqueta
+                </button>
+                ${btnAdminHtml}
+              </td>
             </tr>
-          </thead>
-          <tbody id="tbody-existencias">${filas}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
+          `;
+            })
+            .join('');
 
-    // Filtros instantáneos de tabla
-    const filtrarTabla = () => {
-        const q = document.getElementById('filtro-existencias-txt').value.toLowerCase().trim();
-        const cat = document.getElementById('filtro-existencias-cat').value;
-        document.querySelectorAll('#tbody-existencias tr').forEach((tr) => {
-            const matchTxt = tr.textContent.toLowerCase().includes(q);
-            const matchCat = cat === 'TODAS' || tr.dataset.cat === cat;
-            tr.style.display = matchTxt && matchCat ? '' : 'none';
-        });
-    };
-    document.getElementById('filtro-existencias-txt').addEventListener('input', filtrarTabla);
-    document.getElementById('filtro-existencias-cat').addEventListener('change', filtrarTabla);
+        const opcionesFiltroCat = [
+            `<option value="TODAS">Todas las categorías</option>`,
+            ...CATEGORIAS_ALMACEN.map((c) => `<option value="${c.code}">${c.label}</option>`)
+        ].join('');
 
-    // Reimprimir etiqueta desde cualquier fila
-    container.querySelectorAll('.btn-print-row').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const sub = [btn.dataset.lote ? `Lote: ${btn.dataset.lote}` : '', btn.dataset.cad ? `Cad: ${btn.dataset.cad}` : '']
-                .filter(Boolean)
-                .join(' • ');
-            imprimirEtiquetaCodigo(btn.dataset.code, btn.dataset.nombre, sub);
-        });
-    });
+        container.innerHTML = `
+        <div id="admin-edit-box" class="mb-4"></div>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+                <h2 class="font-bold text-slate-800">Existencias por Lote — ${ranchoNombre}</h2>
+                <span class="text-xs text-slate-500">${lotes.length} lotes activos</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <input id="filtro-existencias-txt" type="text" placeholder="Buscar producto, lote o anaquel..."
+                    class="rounded-xl border border-slate-300 px-3 py-1.5 text-xs focus:border-emerald-600 focus:outline-none" />
+                <select id="filtro-existencias-cat" class="rounded-xl border border-slate-300 px-3 py-1.5 text-xs">
+                    ${opcionesFiltroCat}
+                </select>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th class="py-3 px-4">Código</th>
+                  <th class="py-3 px-4">Producto / Ubicación</th>
+                  <th class="py-3 px-4">Lote</th>
+                  <th class="py-3 px-4">Caducidad</th>
+                  <th class="py-3 px-4">Existencia</th>
+                  <th class="py-3 px-4 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-existencias">${filas}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
 
-    // Herramientas exclusivas ADMIN: Ajuste físico y Edición de producto
-    if (esAdmin) {
-        container.querySelectorAll('.btn-ajustar-lote').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const actual = btn.dataset.actual;
-                const nuevaStr = prompt(
-                    `AJUSTE FÍSICO ADMIN\nProducto: ${btn.dataset.nombre}\nExistencia en sistema: ${actual}\n\nEscribe la cantidad física real:`,
-                    actual
-                );
-                if (nuevaStr === null || nuevaStr.trim() === '') return;
+        const filtrarTabla = () => {
+            const q = document.getElementById('filtro-existencias-txt').value.toLowerCase().trim();
+            const cat = document.getElementById('filtro-existencias-cat').value;
+            document.querySelectorAll('#tbody-existencias tr').forEach((tr) => {
+                const matchTxt = tr.textContent.toLowerCase().includes(q);
+                const matchCat = cat === 'TODAS' || tr.dataset.cat === cat;
+                tr.style.display = matchTxt && matchCat ? '' : 'none';
+            });
+        };
+        document.getElementById('filtro-existencias-txt').addEventListener('input', filtrarTabla);
+        document.getElementById('filtro-existencias-cat').addEventListener('change', filtrarTabla);
 
-                const nuevaNum = Number(nuevaStr);
-                if (isNaN(nuevaNum) || nuevaNum < 0) {
-                    mostrarToast('Cantidad inválida.', 'error');
-                    return;
-                }
-
-                const motivo = prompt('Motivo del ajuste (ej. Conteo físico mensual / Frasco roto):', 'Conteo físico');
-                try {
-                    await ajustarStockLoteAdmin({
-                        id_lote_interno: btn.dataset.loteId,
-                        codigo_barras: btn.dataset.code,
-                        id_rancho: state.activeRanchId,
-                        existencia_anterior: actual,
-                        existencia_nueva: nuevaNum,
-                        motivo: motivo || 'Conteo físico',
-                        id_usuario: state.currentUser.id_usuario
-                    });
-                    mostrarToast('Inventario ajustado y registrado en Kardex.', 'success');
-                    await actualizarContadorAlertas();
-                    renderVistaExistencias(container);
-                } catch (err) {
-                    mostrarToast(err.message, 'error');
-                }
+        container.querySelectorAll('.btn-print-row').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const sub = [btn.dataset.lote ? `Lote: ${btn.dataset.lote}` : '', btn.dataset.cad ? `Cad: ${btn.dataset.cad}` : '']
+                    .filter(Boolean)
+                    .join(' • ');
+                imprimirEtiquetaCodigo(btn.dataset.code, btn.dataset.nombre, sub);
             });
         });
 
-        container.querySelectorAll('.btn-editar-prod').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const prod = await buscarProductoPorCodigo(btn.dataset.code, state.activeRanchId);
-                if (!prod) return;
+        if (esAdmin) {
+            container.querySelectorAll('.btn-ajustar-lote').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    const actual = btn.dataset.actual;
+                    const nuevaStr = prompt(
+                        `AJUSTE FÍSICO ADMIN\nProducto: ${btn.dataset.nombre}\nExistencia en sistema: ${actual}\n\nEscribe la cantidad física real:`,
+                        actual
+                    );
+                    if (nuevaStr === null || nuevaStr.trim() === '') return;
 
-                const editBox = document.getElementById('admin-edit-box');
-                editBox.innerHTML = `
-                    <form id="form-admin-edit-prod" class="bg-amber-50 border border-amber-300 p-4 rounded-2xl space-y-3">
-                        <div class="flex justify-between items-center">
-                            <h3 class="font-bold text-sm text-amber-950">✏️ Editar Ficha de Catálogo (${prod.codigo_barras})</h3>
-                            <button type="button" id="btn-cancel-edit" class="text-xs text-slate-600 hover:underline">Cerrar</button>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-                            <div>
-                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Comercial</label>
-                                <input id="edit-nombre" type="text" required value="${prod.nombre}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
-                            </div>
-                            <div>
-                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">Principio Activo</label>
-                                <input id="edit-principio" type="text" value="${prod.principio_activo || ''}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
-                            </div>
-                            <div>
-                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">Categoría</label>
-                                <select id="edit-cat" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs">
-                                    ${CATEGORIAS_ALMACEN.map((c) => `<option value="${c.code}" ${prod.categoria === c.code ? 'selected' : ''}>${c.label}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">Stock Mínimo (${prod.unidad_medida})</label>
-                                <input id="edit-min" type="number" step="0.01" min="0" value="${prod.stock_minimo}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
-                            </div>
-                        </div>
-                        <button type="submit" class="bg-slate-900 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
-                            Guardar Cambios en Catálogo
-                        </button>
-                    </form>
-                `;
+                    const nuevaNum = Number(nuevaStr);
+                    if (isNaN(nuevaNum) || nuevaNum < 0) {
+                        mostrarToast('Cantidad inválida.', 'error');
+                        return;
+                    }
 
-                document.getElementById('btn-cancel-edit').onclick = () => (editBox.innerHTML = '');
-                document.getElementById('form-admin-edit-prod').onsubmit = async (ev) => {
-                    ev.preventDefault();
+                    const motivo = prompt('Motivo del ajuste (ej. Conteo físico mensual / Frasco roto):', 'Conteo físico');
                     try {
-                        await actualizarProductoCatalogo(prod.codigo_barras, {
-                            nombre: document.getElementById('edit-nombre').value.trim(),
-                            principio_activo: document.getElementById('edit-principio').value.trim(),
-                            categoria: document.getElementById('edit-cat').value,
-                            unidad_medida: prod.unidad_medida,
-                            stock_minimo: document.getElementById('edit-min').value
+                        await ajustarStockLoteAdmin({
+                            id_lote_interno: btn.dataset.loteId,
+                            codigo_barras: btn.dataset.code,
+                            id_rancho: state.activeRanchId,
+                            existencia_anterior: actual,
+                            existencia_nueva: nuevaNum,
+                            motivo: motivo || 'Conteo físico',
+                            id_usuario: state.currentUser.id_usuario
                         });
-                        mostrarToast('Producto actualizado correctamente.', 'success');
+                        mostrarToast('Inventario ajustado y registrado en Kardex.', 'success');
                         await actualizarContadorAlertas();
                         renderVistaExistencias(container);
                     } catch (err) {
                         mostrarToast(err.message, 'error');
                     }
-                };
+                });
             });
-        });
+
+            container.querySelectorAll('.btn-editar-prod').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    const prod = await buscarProductoPorCodigo(btn.dataset.code, state.activeRanchId);
+                    if (!prod) return;
+
+                    const editBox = document.getElementById('admin-edit-box');
+                    editBox.innerHTML = `
+                        <form id="form-admin-edit-prod" class="bg-amber-50 border border-amber-300 p-4 rounded-2xl space-y-3">
+                            <div class="flex justify-between items-center">
+                                <h3 class="font-bold text-sm text-amber-950">✏️ Editar Ficha de Catálogo (${prod.codigo_barras})</h3>
+                                <button type="button" id="btn-cancel-edit" class="text-xs text-slate-600 hover:underline">Cerrar</button>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Comercial</label>
+                                    <input id="edit-nombre" type="text" required value="${prod.nombre}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Principio Activo</label>
+                                    <input id="edit-principio" type="text" value="${prod.principio_activo || ''}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Categoría</label>
+                                    <select id="edit-cat" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs">
+                                        ${CATEGORIAS_ALMACEN.map((c) => `<option value="${c.code}" ${prod.categoria === c.code ? 'selected' : ''}>${c.label}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Stock Mínimo (${prod.unidad_medida})</label>
+                                    <input id="edit-min" type="number" step="0.01" min="0" value="${prod.stock_minimo}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
+                                </div>
+                            </div>
+                            <button type="submit" class="bg-slate-900 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
+                                Guardar Cambios en Catálogo
+                            </button>
+                        </form>
+                    `;
+
+                    document.getElementById('btn-cancel-edit').onclick = () => (editBox.innerHTML = '');
+                    document.getElementById('form-admin-edit-prod').onsubmit = async (ev) => {
+                        ev.preventDefault();
+                        try {
+                            await actualizarProductoCatalogo(prod.codigo_barras, {
+                                nombre: document.getElementById('edit-nombre').value.trim(),
+                                principio_activo: document.getElementById('edit-principio').value.trim(),
+                                categoria: document.getElementById('edit-cat').value,
+                                unidad_medida: prod.unidad_medida,
+                                stock_minimo: document.getElementById('edit-min').value
+                            });
+                            mostrarToast('Producto actualizado correctamente.', 'success');
+                            await actualizarContadorAlertas();
+                            renderVistaExistencias(container);
+                        } catch (err) {
+                            mostrarToast(err.message, 'error');
+                        }
+                    };
+                });
+            });
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm">Error al cargar existencias: ${err.message}</div>`;
     }
 }
 
