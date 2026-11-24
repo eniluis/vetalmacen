@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vetalmacen-v6';
+const CACHE_NAME = 'vetalmacen-v7';
 const ASSETS = [
     './',
     './index.html',
@@ -33,7 +33,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     if (event.request.url.includes('supabase.co')) return;
 
+    // Intenta traer siempre lo más nuevo de la red; si no hay señal en el rancho, usa la caché
     event.respondWith(
-        caches.match(event.request).then((cached) => cached || fetch(event.request))
+        fetch(event.request)
+        .then((networkResponse) => {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
     );
 });
