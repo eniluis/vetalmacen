@@ -1,25 +1,38 @@
 // js/auth.js
-import { supabase, SESSION_KEY, RANCH_NAMES, state } from './config.js';
+import { supabase, SESSION_KEY, RANCH_NAMES, state } from './config.js?v=8';
 
 const ROLES_PERMITIDOS_ALMACEN = ['ADMIN', 'DIESEL', 'ALMACEN', 'FARMACIA'];
 
 export async function cargarRanchosActivos() {
-    const { data, error } = await supabase
-        .from('ranchos')
-        .select('id_rancho, nombre')
-        .eq('activo', true)
-        .order('nombre');
+    const respaldo = Object.entries(RANCH_NAMES).map(([id_rancho, nombre]) => ({
+        id_rancho,
+        nombre
+    }));
 
-    if (error || !data || data.length === 0) {
-        return Object.entries(RANCH_NAMES).map(([id_rancho, nombre]) => ({
-            id_rancho,
-            nombre
-        }));
+    if (!supabase) return respaldo;
+
+    try {
+        const { data, error } = await supabase
+            .from('ranchos')
+            .select('id_rancho, nombre')
+            .eq('activo', true)
+            .order('nombre');
+
+        if (error || !data || data.length === 0) {
+            return respaldo;
+        }
+        return data;
+    } catch (err) {
+        console.warn('Cargando ranchos locales de respaldo:', err);
+        return respaldo;
     }
-    return data;
 }
 
 export async function iniciarSesionConPin(idRancho, pin) {
+    if (!supabase) {
+        throw new Error('Sin conexión con el servidor de base de datos.');
+    }
+
     const { data, error } = await supabase
         .from('usuarios_roles')
         .select('id_usuario, nombre, rol, id_rancho, activo')
@@ -58,10 +71,14 @@ export async function iniciarSesionConPin(idRancho, pin) {
 export function restaurarSesion() {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const sesion = JSON.parse(raw);
-    state.currentUser = sesion;
-    state.activeRanchId = sesion.id_rancho;
-    return sesion;
+    try {
+        const sesion = JSON.parse(raw);
+        state.currentUser = sesion;
+        state.activeRanchId = sesion.id_rancho;
+        return sesion;
+    } catch {
+        return null;
+    }
 }
 
 export function cerrarSesion() {

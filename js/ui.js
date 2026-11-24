@@ -1,5 +1,4 @@
 // js/ui.js
-
 export function mostrarToast(mensaje, tipo = 'success') {
     let container = document.getElementById('toast-container');
     if (!container) {

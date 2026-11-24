@@ -1,5 +1,4 @@
 // js/scanner.js
-
 export class DualScanner {
     constructor(onScanCallback) {
         this.onScan = onScanCallback;

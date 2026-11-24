@@ -1,5 +1,5 @@
 // js/inventory.js
-import { supabase, OFFLINE_QUEUE_KEY, state } from './config.js';
+import { supabase, OFFLINE_QUEUE_KEY, state } from './config.js?v=8';
 
 export function cargarColaOffline() {
     try {
@@ -28,7 +28,7 @@ function encolarOperacionOffline(tipoOperacion, payload) {
 
 export async function sincronizarColaOffline() {
     cargarColaOffline();
-    if (!state.offlineQueue.length || !navigator.onLine) return 0;
+    if (!state.offlineQueue.length || !navigator.onLine || !supabase) return 0;
 
     const pendientes = [...state.offlineQueue];
     const fallidos = [];

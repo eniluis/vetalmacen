@@ -6,9 +6,9 @@ import {
     AREAS_DESTINO_SALIDA,
     UNIDADES_MEDIDA,
     state
-} from './config.js';
-import { cargarRanchosActivos, iniciarSesionConPin, restaurarSesion, cerrarSesion } from './auth.js';
-import { DualScanner } from './scanner.js';
+} from './config.js?v=8';
+import { cargarRanchosActivos, iniciarSesionConPin, restaurarSesion, cerrarSesion } from './auth.js?v=8';
+import { DualScanner } from './scanner.js?v=8';
 import {
     cargarColaOffline,
     sincronizarColaOffline,
@@ -21,8 +21,8 @@ import {
     obtenerAlertasRancho,
     obtenerMovimientosPendientes,
     marcarMovimientosExportados
-} from './inventory.js';
-import { mostrarToast } from './ui.js';
+} from './inventory.js?v=8';
+import { mostrarToast } from './ui.js?v=8';
 
 let scanner = null;
 

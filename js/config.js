@@ -2,7 +2,9 @@
 export const SUPABASE_URL = 'https://swgqjmowhdkzaodkyvpj.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_1PeWHaPebHs1e_vqsqr6Fw_KvQjSl-e';
 
-export const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+export const supabase = window.supabase ?
+    window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) :
+    null;
 
 export const COMPRAS_WHATSAPP = {
     nombre: 'Compras Matanuzka',

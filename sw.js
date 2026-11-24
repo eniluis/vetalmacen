@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vetalmacen-v7';
+const CACHE_NAME = 'vetalmacen-v8';
 const ASSETS = [
     './',
     './index.html',
@@ -6,12 +6,12 @@ const ASSETS = [
     './icons/icon.svg',
     './icons/icon-192.png',
     './icons/icon-512.png',
-    './js/config.js?v=6',
-    './js/auth.js?v=6',
-    './js/scanner.js?v=6',
-    './js/inventory.js?v=6',
-    './js/ui.js?v=6',
-    './js/app.js?v=6'
+    './js/config.js?v=8',
+    './js/auth.js?v=8',
+    './js/scanner.js?v=8',
+    './js/inventory.js?v=8',
+    './js/ui.js?v=8',
+    './js/app.js?v=8'
 ];
 
 self.addEventListener('install', (event) => {
@@ -33,7 +33,6 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     if (event.request.url.includes('supabase.co')) return;
 
-    // Intenta traer siempre lo más nuevo de la red; si no hay señal en el rancho, usa la caché
     event.respondWith(
         fetch(event.request)
         .then((networkResponse) => {
