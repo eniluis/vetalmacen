@@ -69,12 +69,18 @@
                     <button data-view="catalogo" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
                         <span>💊</span> Alta / Catálogo
                     </button>
+                    <button data-view="kardex" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
+                        <span>📜</span> Kardex / Historial
+                    </button>
                     <button data-view="alertas" class="nav-btn w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
                         <span class="flex items-center gap-3"><span>🚨</span> Alertas y Reorden</span>
                         <span id="badge-alertas-pc" class="hidden bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">0</span>
                     </button>
                     <button data-view="sincronizacion" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
                         <span>🔄</span> Exportar / Sincronizar
+                    </button>
+                    <button data-view="global" class="nav-btn admin-only hidden w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-amber-300 font-medium">
+                        <span>🏢</span> Global 4 Ranchos
                     </button>
                 </nav>
             </div>
@@ -105,27 +111,33 @@
         </main>
 
         <!-- BARRA INFERIOR PARA MÓVIL -->
-        <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-5 py-1.5 z-20">
-            <button data-view="escaner" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
-                <span class="text-xl">📷</span> Escanear
+        <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex justify-around py-1.5 z-20 overflow-x-auto">
+            <button data-view="escaner" class="nav-btn flex flex-col items-center py-1 px-2 text-slate-500 text-[11px]">
+                <span class="text-lg">📷</span> Escanear
             </button>
-            <button data-view="existencias" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
-                <span class="text-xl">📦</span> Stock
+            <button data-view="existencias" class="nav-btn flex flex-col items-center py-1 px-2 text-slate-500 text-[11px]">
+                <span class="text-lg">📦</span> Stock
             </button>
-            <button data-view="catalogo" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
-                <span class="text-xl">💊</span> Alta
+            <button data-view="catalogo" class="nav-btn flex flex-col items-center py-1 px-2 text-slate-500 text-[11px]">
+                <span class="text-lg">💊</span> Alta
             </button>
-            <button data-view="alertas" class="nav-btn relative flex flex-col items-center py-1 text-slate-500 text-xs">
-                <span class="text-xl">🚨</span> Alertas
-                <span id="badge-alertas-mob" class="hidden absolute top-0.5 right-2 bg-red-600 text-white text-[10px] font-bold px-1.5 rounded-full">0</span>
+            <button data-view="kardex" class="nav-btn flex flex-col items-center py-1 px-2 text-slate-500 text-[11px]">
+                <span class="text-lg">📜</span> Kardex
             </button>
-            <button data-view="sincronizacion" class="nav-btn flex flex-col items-center py-1 text-slate-500 text-xs">
-                <span class="text-xl">🔄</span> Sync
+            <button data-view="alertas" class="nav-btn relative flex flex-col items-center py-1 px-2 text-slate-500 text-[11px]">
+                <span class="text-lg">🚨</span> Alertas
+                <span id="badge-alertas-mob" class="hidden absolute top-0.5 right-1 bg-red-600 text-white text-[10px] font-bold px-1.5 rounded-full">0</span>
+            </button>
+            <button data-view="sincronizacion" class="nav-btn flex flex-col items-center py-1 px-2 text-slate-500 text-[11px]">
+                <span class="text-lg">🔄</span> Sync
+            </button>
+            <button data-view="global" class="nav-btn admin-only hidden flex flex-col items-center py-1 px-2 text-amber-600 text-[11px] font-semibold">
+                <span class="text-lg">🏢</span> Global
             </button>
         </nav>
     </div>
 
-    <script type="module" src="./js/app.js?v=8"></script>
+    <script type="module" src="./js/app.js?v=10"></script>
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js');
