@@ -1,5 +1,5 @@
 // js/inventory.js
-import { supabase, OFFLINE_QUEUE_KEY, RANCH_NAMES, state } from './config.js?v=10';
+import { supabase, OFFLINE_QUEUE_KEY, RANCH_NAMES, state } from './config.js?v=11';
 
 export function cargarColaOffline() {
     try {
@@ -121,7 +121,8 @@ export async function registrarEntradaCompleta(datos) {
         p_ubicacion_anaquel: datos.ubicacion_anaquel || null,
         p_cantidad: Number(datos.cantidad),
         p_motivo_destino: datos.motivo_destino || 'Entrada por escaneo',
-        p_id_usuario: datos.id_usuario
+        p_id_usuario: datos.id_usuario,
+        p_costo_unitario: datos.costo_unitario !== undefined && datos.costo_unitario !== '' ? Number(datos.costo_unitario) : null
     };
 
     if (!navigator.onLine) {
@@ -172,9 +173,6 @@ export async function registrarSalidaOMerma(datos) {
     }
 }
 
-// ============================================================================
-// TRASPASO DIRECTO ENTRE RANCHOS (DESCUENTA ORIGEN Y SUMA EN DESTINO)
-// ============================================================================
 export async function registrarTraspasoEntreRanchos({
     producto,
     id_lote_interno,
@@ -209,7 +207,6 @@ export async function registrarTraspasoEntreRanchos({
     const nombreDestino = RANCH_NAMES[rancho_destino] || rancho_destino;
     const extraNota = nota ? ` (${nota})` : '';
 
-    // 1. Registrar salida por traspaso en rancho origen
     const { error: errSalida } = await supabase.from('movimientos_inventario').insert({
         uuid_movimiento: crypto.randomUUID(),
         codigo_barras: producto.codigo_barras,
@@ -222,7 +219,6 @@ export async function registrarTraspasoEntreRanchos({
     });
     if (errSalida) throw errSalida;
 
-    // 2. Registrar entrada automática en rancho destino con el mismo lote y caducidad
     const { error: errEntrada } = await supabase.rpc('registrar_entrada_escaneo', {
         p_uuid_movimiento: crypto.randomUUID(),
         p_codigo_barras: producto.codigo_barras,
@@ -237,14 +233,12 @@ export async function registrarTraspasoEntreRanchos({
         p_ubicacion_anaquel: loteOrigen.ubicacion_anaquel || null,
         p_cantidad: cantNum,
         p_motivo_destino: `Traspaso recibido de ${nombreOrigen}${extraNota}`,
-        p_id_usuario: id_usuario
+        p_id_usuario: id_usuario,
+        p_costo_unitario: Number(producto.costo_unitario || 0)
     });
     if (errEntrada) throw errEntrada;
 }
 
-// ============================================================================
-// HERRAMIENTAS ADMIN: AJUSTE DE INVENTARIO FÍSICO Y EDICIÓN DE PRODUCTO
-// ============================================================================
 export async function ajustarStockLoteAdmin({
     id_lote_interno,
     codigo_barras,
@@ -268,7 +262,6 @@ export async function ajustarStockLoteAdmin({
 
     if (errUpdate) throw errUpdate;
 
-    // Registrar movimiento de auditoría en Kardex sin alterar doble el saldo
     await supabase.from('movimientos_inventario').insert({
         uuid_movimiento: crypto.randomUUID(),
         codigo_barras,
@@ -289,16 +282,14 @@ export async function actualizarProductoCatalogo(codigoBarras, cambios) {
             principio_activo: cambios.principio_activo || null,
             categoria: cambios.categoria,
             unidad_medida: cambios.unidad_medida,
-            stock_minimo: Number(cambios.stock_minimo || 0)
+            stock_minimo: Number(cambios.stock_minimo || 0),
+            costo_unitario: Number(cambios.costo_unitario || 0)
         })
         .eq('codigo_barras', codigoBarras);
 
     if (error) throw error;
 }
 
-// ============================================================================
-// CONSULTAS: EXISTENCIAS, ALERTAS, KARDEX, EXPORTACIÓN Y TABLERO GLOBAL
-// ============================================================================
 export async function obtenerExistenciasRancho(idRancho) {
     const { data: lotes, error: errLotes } = await supabase
         .from('inventario_lotes')
@@ -324,15 +315,15 @@ export async function obtenerExistenciasRancho(idRancho) {
             principio_activo: '',
             categoria: 'GENERAL',
             unidad_medida: 'Pieza',
-            stock_minimo: 0
+            stock_minimo: 0,
+            costo_unitario: 0
         }
     }));
 
     return state.dbLotes;
 }
 
-// === [CAMBIO 2 en js/inventory.js]: Reemplazar obtenerHistorialKardex (evita fallo de join en Kardex) ===
-export async function obtenerHistorialKardex(idRancho, limite = 120) {
+export async function obtenerHistorialKardex(idRancho, limite = 150) {
     const { data: movs, error: errMovs } = await supabase
         .from('movimientos_inventario')
         .select('*')
@@ -343,7 +334,7 @@ export async function obtenerHistorialKardex(idRancho, limite = 120) {
     if (errMovs) throw errMovs;
 
     const [{ data: productos }, { data: lotes }] = await Promise.all([
-        supabase.from('productos_almacen').select('codigo_barras, nombre, unidad_medida'),
+        supabase.from('productos_almacen').select('codigo_barras, nombre, unidad_medida, costo_unitario'),
         supabase.from('inventario_lotes').select('id_lote_interno, numero_lote').eq('id_rancho', idRancho)
     ]);
 
@@ -352,7 +343,7 @@ export async function obtenerHistorialKardex(idRancho, limite = 120) {
 
     return (movs || []).map((m) => ({
         ...m,
-        productos_almacen: mapaProd.get(m.codigo_barras) || { nombre: m.codigo_barras, unidad_medida: '' },
+        productos_almacen: mapaProd.get(m.codigo_barras) || { nombre: m.codigo_barras, unidad_medida: '', costo_unitario: 0 },
         inventario_lotes: mapaLote.get(m.id_lote_interno) || { numero_lote: 'N/A' }
     }));
 }
@@ -409,26 +400,29 @@ export async function obtenerAlertasRancho(idRancho) {
 }
 
 export async function obtenerMovimientosPendientes(idRancho) {
-    const { data, error } = await supabase
+    const { data: movs, error } = await supabase
         .from('movimientos_inventario')
-        .select(`
-            id_movimiento,
-            uuid_movimiento,
-            codigo_barras,
-            tipo_movimiento,
-            cantidad,
-            motivo_destino,
-            fecha_movimiento,
-            id_usuario,
-            productos_almacen ( nombre, unidad_medida ),
-            inventario_lotes ( numero_lote, fecha_caducidad )
-        `)
+        .select('*')
         .eq('id_rancho', idRancho)
         .eq('estatus_sincronizacion', 'PENDIENTE')
         .order('fecha_movimiento', { ascending: true });
 
     if (error) throw error;
-    state.dbPendingMovements = data || [];
+
+    const [{ data: productos }, { data: lotes }] = await Promise.all([
+        supabase.from('productos_almacen').select('codigo_barras, nombre, unidad_medida'),
+        supabase.from('inventario_lotes').select('id_lote_interno, numero_lote, fecha_caducidad').eq('id_rancho', idRancho)
+    ]);
+
+    const mapaProd = new Map((productos || []).map((p) => [p.codigo_barras, p]));
+    const mapaLote = new Map((lotes || []).map((l) => [l.id_lote_interno, l]));
+
+    state.dbPendingMovements = (movs || []).map((m) => ({
+        ...m,
+        productos_almacen: mapaProd.get(m.codigo_barras) || { nombre: m.codigo_barras, unidad_medida: '' },
+        inventario_lotes: mapaLote.get(m.id_lote_interno) || { numero_lote: '', fecha_caducidad: '' }
+    }));
+
     return state.dbPendingMovements;
 }
 
@@ -462,8 +456,18 @@ export async function obtenerResumenGlobalRanchos() {
 
     if (errLotes) throw errLotes;
 
+    const hace30Dias = new Date();
+    hace30Dias.setDate(hace30Dias.getDate() - 30);
+
+    const { data: movsRecientes } = await supabase
+        .from('movimientos_inventario')
+        .select('*')
+        .gte('fecha_movimiento', hace30Dias.toISOString())
+        .order('fecha_movimiento', { ascending: false });
+
     return {
         productos: productos || [],
-        lotes: lotes || []
+        lotes: lotes || [],
+        movsRecientes: movsRecientes || []
     };
 }

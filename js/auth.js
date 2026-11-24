@@ -1,5 +1,5 @@
 // js/auth.js
-import { supabase, SESSION_KEY, RANCH_NAMES, state } from './config.js?v=10';
+import { supabase, SESSION_KEY, RANCH_NAMES, state } from './config.js?v=11';
 
 const ROLES_PERMITIDOS_ALMACEN = ['ADMIN', 'DIESEL', 'ALMACEN', 'FARMACIA'];
 

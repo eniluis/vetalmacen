@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vetalmacen-v10';
+const CACHE_NAME = 'vetalmacen-v11';
 const ASSETS = [
     './',
     './index.html',
@@ -6,12 +6,12 @@ const ASSETS = [
     './icons/icon.svg',
     './icons/icon-192.png',
     './icons/icon-512.png',
-    './js/config.js?v=10',
-    './js/auth.js?v=10',
-    './js/scanner.js?v=10',
-    './js/inventory.js?v=10',
-    './js/ui.js?v=10',
-    './js/app.js?v=10'
+    './js/config.js?v=11',
+    './js/auth.js?v=11',
+    './js/scanner.js?v=11',
+    './js/inventory.js?v=11',
+    './js/ui.js?v=11',
+    './js/app.js?v=11'
 ];
 
 self.addEventListener('install', (event) => {

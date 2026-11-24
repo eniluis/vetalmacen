@@ -6,9 +6,9 @@ import {
     AREAS_DESTINO_SALIDA,
     UNIDADES_MEDIDA,
     state
-} from './config.js?v=10';
-import { cargarRanchosActivos, iniciarSesionConPin, restaurarSesion, cerrarSesion } from './auth.js?v=10';
-import { DualScanner } from './scanner.js?v=10';
+} from './config.js?v=11';
+import { cargarRanchosActivos, iniciarSesionConPin, restaurarSesion, cerrarSesion } from './auth.js?v=11';
+import { DualScanner } from './scanner.js?v=11';
 import {
     cargarColaOffline,
     sincronizarColaOffline,
@@ -26,8 +26,8 @@ import {
     obtenerMovimientosPendientes,
     marcarMovimientosExportados,
     obtenerResumenGlobalRanchos
-} from './inventory.js?v=10';
-import { mostrarToast } from './ui.js?v=10';
+} from './inventory.js?v=11';
+import { mostrarToast } from './ui.js?v=11';
 
 let scanner = null;
 
@@ -149,6 +149,7 @@ async function actualizarContadorAlertas() {
 
 async function cambiarVista(vista) {
     state.activeView = vista;
+    window.__conteoRapidoActivo = false;
 
     document.querySelectorAll('.nav-btn').forEach((btn) => {
         const activo = btn.dataset.view === vista;
@@ -171,7 +172,7 @@ async function cambiarVista(vista) {
 }
 
 // ============================================================================
-// UTILIDAD: IMPRIMIR ETIQUETA CODE128 (DESDE ALTA O DESDE EXISTENCIAS)
+// UTILIDADES: ETIQUETA CODE128, MONEDA Y EXPORTACIÓN EXCEL (.XLSX) CON DISEÑO
 // ============================================================================
 function imprimirEtiquetaCodigo(codigo, nombreProducto, subtexto = '') {
     if (!window.JsBarcode) {
@@ -189,7 +190,7 @@ function imprimirEtiquetaCodigo(codigo, nombreProducto, subtexto = '') {
             fontSize: 13,
             margin: 4
         });
-    } catch (e) {
+    } catch {
         mostrarToast('Código no compatible para etiqueta de barras.', 'error');
         return;
     }
@@ -204,6 +205,126 @@ function imprimirEtiquetaCodigo(codigo, nombreProducto, subtexto = '') {
         </body></html>
     `);
     win.document.close();
+}
+
+function formatoMoneda(val) {
+    return Number(val || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+}
+
+function descargarExcelEstilizado({ nombreArchivo, hojas }) {
+    if (!window.XLSX) {
+        mostrarToast('La librería de Excel aún está cargando, intenta de nuevo.', 'warning');
+        return;
+    }
+
+    const wb = window.XLSX.utils.book_new();
+
+    const estiloTitulo = {
+        font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } },
+        fill: { fgColor: { rgb: '0F172A' } },
+        alignment: { vertical: 'center', horizontal: 'left' }
+    };
+
+    const estiloSubtitulo = {
+        font: { italic: true, sz: 10, color: { rgb: '334155' } },
+        fill: { fgColor: { rgb: 'F1F5F9' } },
+        alignment: { vertical: 'center', horizontal: 'left' }
+    };
+
+    const estiloHeader = {
+        font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } },
+        fill: { fgColor: { rgb: '059669' } },
+        alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+        border: {
+            top: { style: 'thin', color: { rgb: '047857' } },
+            bottom: { style: 'medium', color: { rgb: '047857' } },
+            left: { style: 'thin', color: { rgb: '047857' } },
+            right: { style: 'thin', color: { rgb: '047857' } }
+        }
+    };
+
+    for (const hoja of hojas) {
+        const wsData = [];
+        let filaInicioTabla = 0;
+
+        if (hoja.titulo) {
+            wsData.push([hoja.titulo]);
+            wsData.push([hoja.subtitulo || `Generado por VetAlmacén • ${new Date().toLocaleDateString('es-MX')}`]);
+            wsData.push([]);
+            filaInicioTabla = 3;
+        }
+
+        wsData.push(hoja.encabezados);
+        for (const fila of hoja.filas) {
+            wsData.push(fila);
+        }
+
+        const ws = window.XLSX.utils.aoa_to_sheet(wsData);
+        const totalCols = hoja.encabezados.length;
+
+        if (hoja.titulo) {
+            ws['!merges'] = [
+                { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
+                { s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } }
+            ];
+            for (let c = 0; c < totalCols; c++) {
+                const refTit = window.XLSX.utils.encode_cell({ r: 0, c });
+                const refSub = window.XLSX.utils.encode_cell({ r: 1, c });
+                if (ws[refTit]) ws[refTit].s = estiloTitulo;
+                if (ws[refSub]) ws[refSub].s = estiloSubtitulo;
+            }
+        }
+
+        for (let c = 0; c < totalCols; c++) {
+            const ref = window.XLSX.utils.encode_cell({ r: filaInicioTabla, c });
+            if (ws[ref]) ws[ref].s = estiloHeader;
+        }
+
+        for (let r = filaInicioTabla + 1; r < wsData.length; r++) {
+            const esPar = (r - filaInicioTabla) % 2 === 0;
+            for (let c = 0; c < totalCols; c++) {
+                const ref = window.XLSX.utils.encode_cell({ r, c });
+                if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+
+                ws[ref].s = {
+                    font: { sz: 10, color: { rgb: '1E293B' } },
+                    fill: { fgColor: { rgb: esPar ? 'F8FAFC' : 'FFFFFF' } },
+                    alignment: { vertical: 'center', horizontal: typeof wsData[r][c] === 'number' ? 'right' : 'left' },
+                    border: {
+                        top: { style: 'thin', color: { rgb: 'E2E8F0' } },
+                        bottom: { style: 'thin', color: { rgb: 'E2E8F0' } },
+                        left: { style: 'thin', color: { rgb: 'E2E8F0' } },
+                        right: { style: 'thin', color: { rgb: 'E2E8F0' } }
+                    }
+                };
+
+                if (hoja.formatosMoneda && hoja.formatosMoneda.includes(c) && typeof wsData[r][c] === 'number') {
+                    ws[ref].z = '$#,##0.00';
+                }
+            }
+        }
+
+        ws['!cols'] = hoja.encabezados.map((h, idx) => {
+            const maxLen = Math.max(
+                String(h).length + 4,
+                ...hoja.filas.map((f) => String(f[idx] ?? '').length + 3)
+            );
+            return { wch: Math.min(42, Math.max(12, maxLen)) };
+        });
+
+        ws['!rows'] = [];
+        if (hoja.titulo) {
+            ws['!rows'][0] = { hpt: 28 };
+            ws['!rows'][1] = { hpt: 20 };
+            ws['!rows'][filaInicioTabla] = { hpt: 26 };
+        } else {
+            ws['!rows'][0] = { hpt: 26 };
+        }
+
+        window.XLSX.utils.book_append_sheet(wb, ws, hoja.nombreHoja || 'Datos');
+    }
+
+    window.XLSX.writeFile(wb, nombreArchivo);
 }
 
 // ============================================================================
@@ -315,6 +436,11 @@ function generarUrlWhatsappReorden(producto, stockActual) {
 }
 
 async function procesarCodigoEscaneado(codigo) {
+    if (window.__conteoRapidoActivo && typeof window.__registrarEscaneoConteo === 'function') {
+        await window.__registrarEscaneoConteo(codigo);
+        return;
+    }
+
     if (state.activeView !== 'escaner') {
         await cambiarVista('escaner');
     }
@@ -516,7 +642,7 @@ async function procesarCodigoEscaneado(codigo) {
 }
 
 // ============================================================================
-// VISTA 2: ALTA DE PRODUCTO (CON ALMACÉN DESTINO VISIBLE Y SELECTOR ADMIN)
+// VISTA 2: ALTA DE PRODUCTO + IMPORTACIÓN MASIVA DESDE EXCEL (.XLSX / .CSV)
 // ============================================================================
 function renderFormularioAltaOEntrada(container, codigoPrecargado = '', productoExistente = null) {
     const esAltaSinEscaneo = !codigoPrecargado && !productoExistente;
@@ -528,6 +654,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
     const catActual = productoExistente ? productoExistente.categoria : '';
     const uniActual = productoExistente ? productoExistente.unidad_medida : '';
     const minActual = productoExistente && productoExistente.stock_minimo !== undefined ? productoExistente.stock_minimo : 2;
+    const costoActual = productoExistente && productoExistente.costo_unitario !== undefined ? productoExistente.costo_unitario : '';
 
     const opcionesCategorias = CATEGORIAS_ALMACEN.map(
         (c) => `<option value="${c.code}" ${catActual === c.code ? 'selected' : ''}>${c.label}</option>`
@@ -542,6 +669,30 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
             ${Object.entries(RANCH_NAMES).map(([k, nom]) => `<option value="${k}" ${state.activeRanchId === k ? 'selected' : ''}>${nom}</option>`).join('')}
            </select>`
         : `<span class="font-bold text-emerald-900">${RANCH_NAMES[state.activeRanchId] || state.activeRanchId}</span>`;
+
+    const bloqueImportacionMasiva = !productoExistente && !codigoPrecargado
+        ? `
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 mt-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                    <h3 class="font-bold text-base text-slate-800">📥 Importación Masiva desde Excel (.xlsx / .csv)</h3>
+                    <p class="text-xs text-slate-500">Carga decenas de medicamentos y lotes de una sola vez al almacén destino seleccionado arriba.</p>
+                </div>
+                <button type="button" id="btn-descargar-plantilla-csv" class="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold px-3.5 py-2 rounded-xl">
+                    📊 Descargar Plantilla Excel (.xlsx)
+                </button>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <input id="input-csv-masivo" type="file" accept=".xlsx,.xls,.csv" class="flex-1 text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" />
+                <button type="button" id="btn-ejecutar-importacion" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl">
+                    Subir Filas al Inventario
+                </button>
+            </div>
+            <div id="preview-csv-masivo"></div>
+        </div>
+        `
+        : '';
 
     container.innerHTML = `
     <form id="form-alta-entrada" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
@@ -580,7 +731,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Categoría *</label>
           <select id="alta-categoria" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
@@ -592,6 +743,11 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
           <select id="alta-unidad" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
             ${opcionesUnidades}
           </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Costo Unitario $ (Opcional)</label>
+          <input id="alta-costo" type="number" step="0.01" min="0" value="${costoActual}" placeholder="Ej. 245.50"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
         </div>
       </div>
 
@@ -627,6 +783,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
         Guardar y Sumar al Inventario
       </button>
     </form>
+    ${bloqueImportacionMasiva}
   `;
 
     if (window.JsBarcode && codigoInicial) {
@@ -666,6 +823,7 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
                 categoria: document.getElementById('alta-categoria').value,
                 unidad_medida: document.getElementById('alta-unidad').value,
                 stock_minimo: document.getElementById('alta-minimo').value,
+                costo_unitario: document.getElementById('alta-costo').value,
                 id_rancho: ranchoDestino,
                 numero_lote: document.getElementById('alta-lote').value.trim(),
                 fecha_caducidad: document.getElementById('alta-caducidad').value || null,
@@ -685,12 +843,147 @@ function renderFormularioAltaOEntrada(container, codigoPrecargado = '', producto
             mostrarToast(err.message, 'error');
         }
     });
+
+    const btnPlantilla = document.getElementById('btn-descargar-plantilla-csv');
+    if (btnPlantilla) {
+        btnPlantilla.addEventListener('click', () => {
+            descargarExcelEstilizado({
+                nombreArchivo: 'Plantilla_Carga_VetAlmacen.xlsx',
+                hojas: [
+                    {
+                        nombreHoja: 'Carga_Inventario',
+                        encabezados: [
+                            'CODIGO_BARRAS',
+                            'NOMBRE',
+                            'PRINCIPIO_ACTIVO',
+                            'CATEGORIA',
+                            'UNIDAD_MEDIDA',
+                            'LOTE',
+                            'CADUCIDAD_AAAA_MM_DD',
+                            'CANTIDAD',
+                            'STOCK_MINIMO',
+                            'ANAQUEL',
+                            'COSTO_UNITARIO'
+                        ],
+                        filas: [
+                            ['', 'Penicilina Procainica 100ml', 'Penicilina G', 'ANTIBIOTICO', 'Frasco', 'L-2026B', '2027-08-15', 15, 3, 'Refri 1', 185.5],
+                            ['7501234567890', 'Ivermectina 1% 500ml', 'Ivermectina', 'DESPARASITANTE', 'Frasco', 'IV-904', '2028-01-20', 8, 2, 'Estante A', 320.0]
+                        ],
+                        formatosMoneda: [10]
+                    },
+                    {
+                        nombreHoja: 'Guia_Categorias',
+                        titulo: 'GUÍA DE LLENADO - VETALMACÉN',
+                        subtitulo: 'Usa estas claves de Categoría y Unidades de Medida en la pestaña Carga_Inventario',
+                        encabezados: ['CLAVE_CATEGORIA', 'DESCRIPCION', 'UNIDADES_VALIDAS'],
+                        filas: CATEGORIAS_ALMACEN.map((c, idx) => [
+                            c.code,
+                            c.label,
+                            UNIDADES_MEDIDA[idx] || ''
+                        ])
+                    }
+                ]
+            });
+        });
+
+        let filasParseadas = [];
+        const inputCsv = document.getElementById('input-csv-masivo');
+        const btnImportar = document.getElementById('btn-ejecutar-importacion');
+        const previewDiv = document.getElementById('preview-csv-masivo');
+
+        inputCsv.addEventListener('change', (ev) => {
+            const file = ev.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = new Uint8Array(event.target.result);
+                    const workbook = window.XLSX.read(data, { type: 'array' });
+                    const primeraHoja = workbook.Sheets[workbook.SheetNames[0]];
+                    const rows = window.XLSX.utils.sheet_to_json(primeraHoja, { header: 1, raw: false });
+
+                    if (rows.length < 2) {
+                        mostrarToast('El archivo Excel no contiene filas de datos.', 'warning');
+                        return;
+                    }
+
+                    filasParseadas = [];
+                    for (let i = 1; i < rows.length; i++) {
+                        const cols = (rows[i] || []).map((c) => String(c ?? '').trim());
+                        if (!cols[1] || !cols[5] || !cols[7]) continue;
+
+                        filasParseadas.push({
+                            codigo_barras: cols[0] || `${generarCodigoInterno()}-${i}`,
+                            nombre: cols[1],
+                            principio_activo: cols[2] || '',
+                            categoria: cols[3] || 'ANTIBIOTICO',
+                            unidad_medida: cols[4] || 'Pieza',
+                            numero_lote: cols[5],
+                            fecha_caducidad: cols[6] || null,
+                            cantidad: Number(cols[7]),
+                            stock_minimo: Number(cols[8] || 2),
+                            ubicacion_anaquel: cols[9] || '',
+                            costo_unitario: Number(String(cols[10] || '0').replace(/[^0-9.-]/g, ''))
+                        });
+                    }
+
+                    if (!filasParseadas.length) {
+                        mostrarToast('No se detectaron filas válidas (revisa NOMBRE, LOTE y CANTIDAD).', 'error');
+                        btnImportar.classList.add('hidden');
+                        return;
+                    }
+
+                    btnImportar.classList.remove('hidden');
+                    btnImportar.textContent = `Subir ${filasParseadas.length} producto(s) al Inventario`;
+                    previewDiv.innerHTML = `
+                        <div class="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                            ✅ <b>${filasParseadas.length} filas listas</b> desde Excel (ej. <i>${filasParseadas[0].nombre}</i> — Cant: ${filasParseadas[0].cantidad}).
+                        </div>
+                    `;
+                } catch (err) {
+                    mostrarToast('No se pudo leer el archivo Excel: ' + err.message, 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        btnImportar.addEventListener('click', async () => {
+            if (!filasParseadas.length) return;
+            const ranchoDestino = document.getElementById('alta-rancho')
+                ? document.getElementById('alta-rancho').value
+                : state.activeRanchId;
+
+            btnImportar.disabled = true;
+            btnImportar.textContent = 'Importando...';
+            let exitosos = 0;
+
+            for (const item of filasParseadas) {
+                try {
+                    await registrarEntradaCompleta({
+                        ...item,
+                        id_rancho: ranchoDestino,
+                        motivo_destino: 'Importación masiva Excel',
+                        id_usuario: state.currentUser.id_usuario
+                    });
+                    exitosos++;
+                } catch (err) {
+                    console.error('Error importando fila:', item, err);
+                }
+            }
+
+            mostrarToast(`Se importaron ${exitosos} de ${filasParseadas.length} productos en ${RANCH_NAMES[ranchoDestino]}.`, 'success');
+            await actualizarContadorAlertas();
+            cambiarVista('existencias');
+        });
+    }
 }
 
 // ============================================================================
-// VISTA 3: EXISTENCIAS (CON BUSCADOR, REIMPRESIÓN DE ETIQUETA Y AJUSTES ADMIN)
+// VISTA 3: EXISTENCIAS + MODO CONTEO RÁPIDO GUIADO POR ESCÁNER
 // ============================================================================
 async function renderVistaExistencias(container) {
+    window.__conteoRapidoActivo = false;
     container.innerHTML = `<p class="text-slate-500 text-sm">Cargando inventario...</p>`;
     const ranchoNombre = RANCH_NAMES[state.activeRanchId] || state.activeRanchId;
     const esAdmin = state.currentUser && state.currentUser.rol === 'ADMIN';
@@ -765,7 +1058,10 @@ async function renderVistaExistencias(container) {
                 <h2 class="font-bold text-slate-800">Existencias por Lote — ${ranchoNombre}</h2>
                 <span class="text-xs text-slate-500">${lotes.length} lotes activos</span>
             </div>
-            <div class="flex flex-wrap gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" id="btn-iniciar-conteo-rapido" class="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-xl">
+                    📋 Conteo Rápido (Escáner)
+                </button>
                 <input id="filtro-existencias-txt" type="text" placeholder="Buscar producto, lote o anaquel..."
                     class="rounded-xl border border-slate-300 px-3 py-1.5 text-xs focus:border-emerald-600 focus:outline-none" />
                 <select id="filtro-existencias-cat" class="rounded-xl border border-slate-300 px-3 py-1.5 text-xs">
@@ -790,6 +1086,10 @@ async function renderVistaExistencias(container) {
           </div>
         </div>
       `;
+
+        document.getElementById('btn-iniciar-conteo-rapido').addEventListener('click', () => {
+            renderModoConteoRapido(container, lotes);
+        });
 
         const filtrarTabla = () => {
             const q = document.getElementById('filtro-existencias-txt').value.toLowerCase().trim();
@@ -860,7 +1160,7 @@ async function renderVistaExistencias(container) {
                                 <h3 class="font-bold text-sm text-amber-950">✏️ Editar Ficha de Catálogo (${prod.codigo_barras})</h3>
                                 <button type="button" id="btn-cancel-edit" class="text-xs text-slate-600 hover:underline">Cerrar</button>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
                                 <div>
                                     <label class="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Comercial</label>
                                     <input id="edit-nombre" type="text" required value="${prod.nombre}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
@@ -879,6 +1179,10 @@ async function renderVistaExistencias(container) {
                                     <label class="block text-[11px] font-semibold text-slate-600 mb-1">Stock Mínimo (${prod.unidad_medida})</label>
                                     <input id="edit-min" type="number" step="0.01" min="0" value="${prod.stock_minimo}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
                                 </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Costo Unitario ($)</label>
+                                    <input id="edit-costo" type="number" step="0.01" min="0" value="${prod.costo_unitario || 0}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs" />
+                                </div>
                             </div>
                             <button type="submit" class="bg-slate-900 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
                                 Guardar Cambios en Catálogo
@@ -895,7 +1199,8 @@ async function renderVistaExistencias(container) {
                                 principio_activo: document.getElementById('edit-principio').value.trim(),
                                 categoria: document.getElementById('edit-cat').value,
                                 unidad_medida: prod.unidad_medida,
-                                stock_minimo: document.getElementById('edit-min').value
+                                stock_minimo: document.getElementById('edit-min').value,
+                                costo_unitario: document.getElementById('edit-costo').value
                             });
                             mostrarToast('Producto actualizado correctamente.', 'success');
                             await actualizarContadorAlertas();
@@ -909,6 +1214,214 @@ async function renderVistaExistencias(container) {
         }
     } catch (err) {
         container.innerHTML = `<div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm">Error al cargar existencias: ${err.message}</div>`;
+    }
+}
+
+// ============================================================================
+// SUB-VISTA: MODO CONTEO RÁPIDO DE INVENTARIO FÍSICO (GUIADO POR ESCÁNER)
+// ============================================================================
+function renderModoConteoRapido(container, lotesRancho) {
+    window.__conteoRapidoActivo = true;
+    const ranchoNombre = RANCH_NAMES[state.activeRanchId] || state.activeRanchId;
+    const esAdmin = state.currentUser && state.currentUser.rol === 'ADMIN';
+
+    const conteoMap = new Map(
+        lotesRancho.map((l) => [
+            l.id_lote_interno,
+            {
+                ...l,
+                fisico: null
+            }
+        ])
+    );
+
+    const pintarTablaConteo = () => {
+        const tbody = document.getElementById('tbody-conteo-rapido');
+        if (!tbody) return;
+
+        let contados = 0;
+        let conDiferencia = 0;
+
+        const filasHtml = Array.from(conteoMap.values())
+            .map((item) => {
+                const prod = item.productos_almacen || {};
+                const sis = Number(item.existencia_actual);
+                const fis = item.fisico;
+                const fueContado = fis !== null;
+                if (fueContado) contados++;
+
+                const diff = fueContado ? fis - sis : 0;
+                if (fueContado && diff !== 0) conDiferencia++;
+
+                let badgeDiff = `<span class="text-slate-400 text-[11px]">Pendiente</span>`;
+                if (fueContado) {
+                    if (diff === 0) badgeDiff = `<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold text-[11px]">✓ Cuadrado</span>`;
+                    else if (diff > 0) badgeDiff = `<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold text-[11px]">+${diff} sobrante</span>`;
+                    else badgeDiff = `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold text-[11px]">${diff} faltante</span>`;
+                }
+
+                return `
+                <tr class="border-b border-slate-100 ${fueContado ? 'bg-emerald-50/30' : ''} text-xs">
+                    <td class="py-2.5 px-3 font-mono">${item.codigo_barras}</td>
+                    <td class="py-2.5 px-3">
+                        <div class="font-bold text-slate-800">${prod.nombre || ''}</div>
+                        <div class="text-[11px] text-slate-400">Lote: ${item.numero_lote} ${item.ubicacion_anaquel ? `• ${item.ubicacion_anaquel}` : ''}</div>
+                    </td>
+                    <td class="py-2.5 px-3 text-center font-semibold text-slate-700">${sis}</td>
+                    <td class="py-2.5 px-3 text-center">
+                        <input type="number" step="0.01" min="0" data-lote-id="${item.id_lote_interno}"
+                            value="${fueContado ? fis : ''}" placeholder="0"
+                            class="input-fisico-conteo w-20 text-center rounded-lg border ${fueContado ? 'border-emerald-500 font-bold' : 'border-slate-300'} px-2 py-1 text-xs" />
+                    </td>
+                    <td class="py-2.5 px-3 text-center">${badgeDiff}</td>
+                </tr>`;
+            })
+            .join('');
+
+        tbody.innerHTML = filasHtml;
+        document.getElementById('resumen-conteo-progreso').textContent = `${contados} de ${conteoMap.size} lotes contados • ${conDiferencia} con diferencia`;
+
+        const btnAplicar = document.getElementById('btn-aplicar-ajustes-conteo');
+        if (btnAplicar) {
+            btnAplicar.disabled = conDiferencia === 0;
+            btnAplicar.textContent = `⚖️ Aplicar ${conDiferencia} Ajuste(s) al Inventario`;
+        }
+
+        tbody.querySelectorAll('.input-fisico-conteo').forEach((inp) => {
+            inp.addEventListener('change', (e) => {
+                const id = Number(e.target.dataset.loteId);
+                const val = e.target.value.trim();
+                const reg = conteoMap.get(id);
+                if (reg) {
+                    reg.fisico = val === '' ? null : Number(val);
+                    pintarTablaConteo();
+                }
+            });
+        });
+    };
+
+    window.__registrarEscaneoConteo = async (codigo) => {
+        const coincidencias = Array.from(conteoMap.values()).filter((l) => l.codigo_barras === codigo.trim());
+        if (!coincidencias.length) {
+            mostrarToast(`El código ${codigo} no tiene lotes activos en ${ranchoNombre}.`, 'warning');
+            return;
+        }
+
+        const target = coincidencias[0];
+        target.fisico = (target.fisico === null ? 0 : target.fisico) + 1;
+        const prod = target.productos_almacen || {};
+        mostrarToast(`+1 ${prod.nombre || codigo} (Lote ${target.numero_lote}) → Físico: ${target.fisico}`, 'success');
+        pintarTablaConteo();
+    };
+
+    container.innerHTML = `
+    <div class="space-y-4">
+        <div class="bg-slate-900 text-white p-5 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="bg-amber-400 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase">Escáner Activo</span>
+                    <h2 class="font-bold text-lg">📋 Conteo Rápido de Inventario Físico — ${ranchoNombre}</h2>
+                </div>
+                <p class="text-xs text-slate-300 mt-1">Pistolea cada frasco o caja para sumar +1 automático, o escribe la cantidad física directa en la tabla.</p>
+                <div id="resumen-conteo-progreso" class="text-xs text-emerald-400 font-semibold mt-2"></div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="btn-cam-conteo" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl">
+                    📷 Cámara
+                </button>
+                ${
+                    esAdmin
+                        ? `<button type="button" id="btn-aplicar-ajustes-conteo" disabled class="bg-amber-400 hover:bg-amber-300 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 text-xs font-bold px-4 py-2.5 rounded-xl">
+                            ⚖️ Aplicar 0 Ajuste(s) al Inventario
+                           </button>`
+                        : ''
+                }
+                <button type="button" id="btn-salir-conteo" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl">
+                    Salir del Conteo
+                </button>
+            </div>
+        </div>
+
+        <div id="reader-conteo" class="hidden w-full max-w-md mx-auto overflow-hidden rounded-xl bg-slate-900"></div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
+                        <tr>
+                            <th class="py-3 px-3">Código</th>
+                            <th class="py-3 px-3">Producto / Lote</th>
+                            <th class="py-3 px-3 text-center">Sistema</th>
+                            <th class="py-3 px-3 text-center">Conteo Físico</th>
+                            <th class="py-3 px-3 text-center">Diferencia</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-conteo-rapido"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    `;
+
+    pintarTablaConteo();
+
+    const btnCamConteo = document.getElementById('btn-cam-conteo');
+    btnCamConteo.addEventListener('click', async () => {
+        const box = document.getElementById('reader-conteo');
+        if (scanner.isCameraRunning) {
+            await scanner.stopCamera();
+            box.classList.add('hidden');
+            btnCamConteo.textContent = '📷 Cámara';
+        } else {
+            try {
+                box.classList.remove('hidden');
+                await scanner.startCamera('reader-conteo');
+                btnCamConteo.textContent = 'Detener Cámara';
+            } catch (err) {
+                mostrarToast(err.message, 'error');
+            }
+        }
+    });
+
+    document.getElementById('btn-salir-conteo').addEventListener('click', async () => {
+        window.__conteoRapidoActivo = false;
+        if (scanner && scanner.isCameraRunning) await scanner.stopCamera();
+        renderVistaExistencias(container);
+    });
+
+    const btnAplicar = document.getElementById('btn-aplicar-ajustes-conteo');
+    if (btnAplicar) {
+        btnAplicar.addEventListener('click', async () => {
+            const pendientesAjuste = Array.from(conteoMap.values()).filter(
+                (item) => item.fisico !== null && Number(item.fisico) !== Number(item.existencia_actual)
+            );
+            if (!pendientesAjuste.length) return;
+
+            if (!confirm(`¿Confirmas aplicar ${pendientesAjuste.length} ajuste(s) físico(s) al inventario y registrarlos en Kardex?`)) {
+                return;
+            }
+
+            btnAplicar.disabled = true;
+            btnAplicar.textContent = 'Aplicando ajustes...';
+
+            for (const item of pendientesAjuste) {
+                await ajustarStockLoteAdmin({
+                    id_lote_interno: item.id_lote_interno,
+                    codigo_barras: item.codigo_barras,
+                    id_rancho: state.activeRanchId,
+                    existencia_anterior: item.existencia_actual,
+                    existencia_nueva: item.fisico,
+                    motivo: 'Conteo rápido con escáner',
+                    id_usuario: state.currentUser.id_usuario
+                });
+            }
+
+            window.__conteoRapidoActivo = false;
+            if (scanner && scanner.isCameraRunning) await scanner.stopCamera();
+            mostrarToast(`Se aplicaron ${pendientesAjuste.length} ajuste(s) correctamente.`, 'success');
+            await actualizarContadorAlertas();
+            renderVistaExistencias(container);
+        });
     }
 }
 
@@ -933,6 +1446,7 @@ async function renderVistaKardex(container) {
             .map((m) => {
                 const prod = m.productos_almacen || {};
                 const lote = m.inventario_lotes || {};
+                const valorMov = Number(m.cantidad || 0) * Number(prod.costo_unitario || 0);
                 const fechaFmt = new Date(m.fecha_movimiento).toLocaleString('es-MX', {
                     day: '2-digit',
                     month: '2-digit',
@@ -950,6 +1464,7 @@ async function renderVistaKardex(container) {
                         <div class="text-[11px] text-slate-400">Lote: ${lote.numero_lote || 'N/A'}</div>
                     </td>
                     <td class="py-3 px-4 font-bold text-slate-900">${m.cantidad} ${prod.unidad_medida || ''}</td>
+                    <td class="py-3 px-4 text-slate-600">${valorMov > 0 ? formatoMoneda(valorMov) : '-'}</td>
                     <td class="py-3 px-4 text-slate-600">${m.motivo_destino || '-'}</td>
                     <td class="py-3 px-4 font-mono text-[11px] text-slate-500">${m.id_usuario}</td>
                 </tr>`;
@@ -983,12 +1498,13 @@ async function renderVistaKardex(container) {
                             <th class="py-3 px-4">Tipo</th>
                             <th class="py-3 px-4">Producto / Lote</th>
                             <th class="py-3 px-4">Cantidad</th>
+                            <th class="py-3 px-4">Valor Est.</th>
                             <th class="py-3 px-4">Destino / Motivo</th>
                             <th class="py-3 px-4">Usuario</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-kardex">
-                        ${filas || '<tr><td colspan="6" class="p-6 text-center text-slate-400 text-sm">Aún no hay movimientos registrados en este rancho.</td></tr>'}
+                        ${filas || '<tr><td colspan="7" class="p-6 text-center text-slate-400 text-sm">Aún no hay movimientos registrados en este rancho.</td></tr>'}
                     </tbody>
                 </table>
             </div>
@@ -1109,7 +1625,7 @@ async function renderVistaAlertas(container) {
 }
 
 // ============================================================================
-// VISTA 6: EXPORTACIÓN CSV (FASE 2) Y COLA OFFLINE
+// VISTA 6: EXPORTACIÓN EXCEL (.XLSX) CON DISEÑO Y COLA OFFLINE
 // ============================================================================
 async function renderVistaSincronizacion(container) {
     const pendientes = await obtenerMovimientosPendientes(state.activeRanchId);
@@ -1129,12 +1645,12 @@ async function renderVistaSincronizacion(container) {
 
       <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 class="font-bold text-lg text-slate-800">Exportar para Sistema Principal — ${ranchoNombre}</h2>
-          <p class="text-sm text-slate-500">Descarga los movimientos registrados en VetAlmacén listos para cargar en el sistema central.</p>
+          <h2 class="font-bold text-lg text-slate-800">Exportar Reporte Excel — ${ranchoNombre}</h2>
+          <p class="text-sm text-slate-500">Descarga los movimientos registrados junto con el corte actual de existencias en formato Excel (.xlsx).</p>
         </div>
-        <button id="btn-exportar-csv" ${!pendientes.length ? 'disabled' : ''}
-          class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold px-5 py-3 rounded-xl text-sm">
-          Descargar CSV (${pendientes.length} pendientes)
+        <button id="btn-exportar-csv"
+          class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-3 rounded-xl text-sm">
+          📊 Descargar Excel (${pendientes.length} mov. pendientes)
         </button>
       </div>
     </div>
@@ -1148,54 +1664,140 @@ async function renderVistaSincronizacion(container) {
     const btnExportar = document.getElementById('btn-exportar-csv');
     if (btnExportar) {
         btnExportar.addEventListener('click', async () => {
-            const encabezados = ['ID_MOV', 'RANCHO', 'FECHA', 'TIPO', 'CODIGO_BARRAS', 'PRODUCTO', 'LOTE', 'CADUCIDAD', 'CANTIDAD', 'DESTINO', 'USUARIO'];
-            const lineas = pendientes.map((m) => {
+            const lotesActuales = await obtenerExistenciasRancho(state.activeRanchId);
+
+            const filasMovs = pendientes.map((m) => {
                 const prod = m.productos_almacen || {};
                 const lote = m.inventario_lotes || {};
                 return [
                     m.id_movimiento,
-                    state.activeRanchId,
-                    m.fecha_movimiento,
+                    ranchoNombre,
+                    new Date(m.fecha_movimiento).toLocaleString('es-MX'),
                     m.tipo_movimiento,
                     m.codigo_barras,
-                    `"${prod.nombre || ''}"`,
+                    prod.nombre || '',
                     lote.numero_lote || '',
-                    lote.fecha_caducidad || '',
-                    m.cantidad,
-                    `"${m.motivo_destino || ''}"`,
+                    lote.fecha_caducidad || 'N/A',
+                    Number(m.cantidad),
+                    m.motivo_destino || '',
                     m.id_usuario
-                ].join(',');
+                ];
             });
 
-            const csv = '\uFEFF' + [encabezados.join(','), ...lineas].join('\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `VetAlmacen_${state.activeRanchId}_${new Date().toISOString().slice(0, 10)}.csv`;
-            a.click();
+            const filasStock = lotesActuales.map((l) => {
+                const prod = l.productos_almacen || {};
+                const costo = Number(prod.costo_unitario || 0);
+                const cant = Number(l.existencia_actual || 0);
+                return [
+                    l.codigo_barras,
+                    prod.nombre || '',
+                    prod.principio_activo || '',
+                    prod.categoria || '',
+                    l.numero_lote,
+                    l.fecha_caducidad || 'N/A',
+                    l.ubicacion_anaquel || '',
+                    cant,
+                    prod.unidad_medida || '',
+                    costo,
+                    cant * costo
+                ];
+            });
 
-            await marcarMovimientosExportados(pendientes.map((m) => m.id_movimiento));
-            mostrarToast('CSV exportado y movimientos marcados.', 'success');
-            renderVistaSincronizacion(container);
+            descargarExcelEstilizado({
+                nombreArchivo: `VetAlmacen_${state.activeRanchId}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                hojas: [
+                    {
+                        nombreHoja: 'Movimientos',
+                        titulo: `REPORTE DE MOVIMIENTOS - ${ranchoNombre.toUpperCase()}`,
+                        subtitulo: `Usuario: ${state.currentUser.nombre} • Movimientos exportados: ${pendientes.length}`,
+                        encabezados: ['ID', 'Rancho', 'Fecha', 'Tipo', 'Código', 'Producto', 'Lote', 'Caducidad', 'Cantidad', 'Destino / Motivo', 'Usuario'],
+                        filas: filasMovs.length ? filasMovs : [['-', ranchoNombre, '-', 'SIN PENDIENTES', '-', '-', '-', '-', 0, '-', '-']]
+                    },
+                    {
+                        nombreHoja: 'Existencias_Corte',
+                        titulo: `INVENTARIO ACTUAL - ${ranchoNombre.toUpperCase()}`,
+                        subtitulo: `Corte de existencias al ${new Date().toLocaleString('es-MX')}`,
+                        encabezados: ['Código', 'Producto', 'Principio Activo', 'Categoría', 'Lote', 'Caducidad', 'Anaquel', 'Existencia', 'Unidad', 'Costo Unit.', 'Valor Total'],
+                        filas: filasStock,
+                        formatosMoneda: [9, 10]
+                    }
+                ]
+            });
+
+            if (pendientes.length > 0) {
+                await marcarMovimientosExportados(pendientes.map((m) => m.id_movimiento));
+                mostrarToast('Excel generado y movimientos marcados como exportados.', 'success');
+                renderVistaSincronizacion(container);
+            } else {
+                mostrarToast('Excel de existencias descargado.', 'success');
+            }
         });
     }
 }
 
 // ============================================================================
-// VISTA 7 (EXCLUSIVA ADMIN): TABLERO GLOBAL DE LOS 4 RANCHOS
+// VISTA 7 (ADMIN): TABLERO GLOBAL + DASHBOARD DE CONSUMO Y COSTOS
 // ============================================================================
 async function renderVistaGlobalAdmin(container) {
-    container.innerHTML = `<p class="text-slate-500 text-sm">Consolidando inventarios de los 4 ranchos...</p>`;
+    container.innerHTML = `<p class="text-slate-500 text-sm">Consolidando inventarios, consumo y costos de los 4 ranchos...</p>`;
 
     try {
-        const { productos, lotes } = await obtenerResumenGlobalRanchos();
+        const { productos, lotes, movsRecientes } = await obtenerResumenGlobalRanchos();
         const ranchKeys = Object.keys(RANCH_NAMES);
         const hoy = new Date();
+        const mapaProd = new Map(productos.map((p) => [p.codigo_barras, p]));
+
+        let valorInventarioGlobal = 0;
+        let gastoConsumo30d = 0;
+        let perdidaMerma30d = 0;
+        const consumoPorArea = {};
+        const rankingProductos = {};
+
+        for (const l of lotes) {
+            const p = mapaProd.get(l.codigo_barras);
+            if (p) {
+                valorInventarioGlobal += Number(l.existencia_actual) * Number(p.costo_unitario || 0);
+            }
+        }
+
+        for (const m of movsRecientes) {
+            const p = mapaProd.get(m.codigo_barras);
+            const costo = p ? Number(p.costo_unitario || 0) : 0;
+            const importe = Number(m.cantidad || 0) * costo;
+            const esTraspaso = (m.motivo_destino || '').startsWith('Traspaso');
+
+            if (m.tipo_movimiento === 'SALIDA' && !esTraspaso) {
+                gastoConsumo30d += importe;
+                const areaBase = (m.motivo_destino || 'General').split(' - ')[0].trim();
+                consumoPorArea[areaBase] = (consumoPorArea[areaBase] || 0) + importe;
+
+                if (!rankingProductos[m.codigo_barras]) {
+                    rankingProductos[m.codigo_barras] = {
+                        nombre: p ? p.nombre : m.codigo_barras,
+                        unidad: p ? p.unidad_medida : '',
+                        cantidad: 0,
+                        importe: 0
+                    };
+                }
+                rankingProductos[m.codigo_barras].cantidad += Number(m.cantidad || 0);
+                rankingProductos[m.codigo_barras].importe += importe;
+            } else if (m.tipo_movimiento === 'MERMA') {
+                perdidaMerma30d += importe;
+            }
+        }
+
+        const topAreas = Object.entries(consumoPorArea).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const maxAreaVal = topAreas.length ? Math.max(...topAreas.map((a) => a[1]), 1) : 1;
+        const topProds = Object.values(rankingProductos).sort((a, b) => b.cantidad - a.cantidad).slice(0, 5);
 
         const tarjetasRanchos = ranchKeys
             .map((rKey) => {
                 const lotesRancho = lotes.filter((l) => l.id_rancho === rKey);
+                const valorRancho = lotesRancho.reduce((acc, l) => {
+                    const p = mapaProd.get(l.codigo_barras);
+                    return acc + Number(l.existencia_actual) * Number(p ? p.costo_unitario || 0 : 0);
+                }, 0);
+
                 const bajos = productos.filter((p) => {
                     const tot = lotesRancho
                         .filter((l) => l.codigo_barras === p.codigo_barras)
@@ -1219,6 +1821,7 @@ async function renderVistaGlobalAdmin(container) {
                             ${esActivo ? '<span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">ACTIVO</span>' : ''}
                         </div>
                         <div class="mt-2 text-xs text-slate-500 space-y-1">
+                            <div>💰 Valor Stock: <b class="text-emerald-700">${formatoMoneda(valorRancho)}</b></div>
                             <div>📦 Lotes activos: <b class="text-slate-800">${lotesRancho.length}</b></div>
                             <div>🚨 Bajo stock: <b class="${bajos > 0 ? 'text-red-600' : 'text-emerald-600'}">${bajos}</b></div>
                             <div>⏳ Caducidad ≤30d: <b class="${proxCad > 0 ? 'text-amber-600' : 'text-slate-700'}">${proxCad}</b></div>
@@ -1245,29 +1848,93 @@ async function renderVistaGlobalAdmin(container) {
                     })
                     .join('');
 
+                const valorTotalProd = sumaGlobal * Number(p.costo_unitario || 0);
+
                 return `
                 <tr class="border-b border-slate-100 hover:bg-slate-50 text-xs">
                     <td class="py-3 px-4">
                         <div class="font-bold text-slate-900">${p.nombre}</div>
-                        <div class="text-[11px] text-slate-400 font-mono">${p.codigo_barras} • ${p.unidad_medida} (Mín: ${p.stock_minimo})</div>
+                        <div class="text-[11px] text-slate-400 font-mono">${p.codigo_barras} • ${p.unidad_medida} • Costo: ${formatoMoneda(p.costo_unitario)}</div>
                     </td>
                     ${celdasRanchos}
                     <td class="py-3 px-4 text-center font-extrabold text-emerald-700 bg-emerald-50/30">${sumaGlobal}</td>
+                    <td class="py-3 px-4 text-right font-semibold text-slate-700">${formatoMoneda(valorTotalProd)}</td>
                 </tr>`;
             })
             .join('');
 
         container.innerHTML = `
         <div class="space-y-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                    <h2 class="font-bold text-xl text-slate-900">🏢 Tablero Global Multi-Rancho (Admin)</h2>
-                    <p class="text-xs text-slate-500">Comparativo en tiempo real de existencias y alertas en los 4 almacenes.</p>
+            <div>
+                <h2 class="font-bold text-xl text-slate-900">🏢 Tablero Global y Reportes de Consumo y Costos (Admin)</h2>
+                <p class="text-xs text-slate-500">Valorización de almacenes, consumo de los últimos 30 días y comparativo multi-rancho.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-slate-900 text-white p-5 rounded-2xl shadow-sm">
+                    <span class="text-xs text-slate-400 uppercase font-semibold">Valor Inventario Actual (4 Ranchos)</span>
+                    <div class="text-2xl font-extrabold text-emerald-400 mt-1">${formatoMoneda(valorInventarioGlobal)}</div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                    <span class="text-xs text-slate-500 uppercase font-semibold">Consumo Operativo (Últimos 30 días)</span>
+                    <div class="text-2xl font-extrabold text-slate-900 mt-1">${formatoMoneda(gastoConsumo30d)}</div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                    <span class="text-xs text-slate-500 uppercase font-semibold">Mermas / Caducados (Últimos 30 días)</span>
+                    <div class="text-2xl font-extrabold text-red-600 mt-1">${formatoMoneda(perdidaMerma30d)}</div>
                 </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 ${tarjetasRanchos}
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <h3 class="font-bold text-sm text-slate-800">📊 Gasto por Área Destino (Últimos 30 días)</h3>
+                    ${
+                        topAreas.length
+                            ? topAreas
+                                  .map(([area, monto]) => {
+                                      const pct = Math.max(5, Math.round((monto / maxAreaVal) * 100));
+                                      return `
+                                      <div class="space-y-1">
+                                          <div class="flex justify-between text-xs">
+                                              <span class="font-medium text-slate-700">${area}</span>
+                                              <span class="font-bold text-slate-900">${formatoMoneda(monto)}</span>
+                                          </div>
+                                          <div class="w-full bg-slate-100 rounded-full h-2">
+                                              <div class="bg-emerald-600 h-2 rounded-full" style="width: ${pct}%"></div>
+                                          </div>
+                                      </div>`;
+                                  })
+                                  .join('')
+                            : `<p class="text-xs text-slate-400">Sin consumos valorizados en los últimos 30 días.</p>`
+                    }
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <h3 class="font-bold text-sm text-slate-800">🏆 Top 5 Medicamentos Más Consumidos (30 días)</h3>
+                    ${
+                        topProds.length
+                            ? topProds
+                                  .map(
+                                      (item, idx) => `
+                                      <div class="flex items-center justify-between text-xs border-b border-slate-100 pb-2 last:border-0">
+                                          <div>
+                                              <span class="font-bold text-emerald-700 mr-1">#${idx + 1}</span>
+                                              <span class="font-semibold text-slate-800">${item.nombre}</span>
+                                          </div>
+                                          <div class="text-right">
+                                              <span class="font-bold text-slate-900">${item.cantidad} ${item.unidad}</span>
+                                              <span class="text-slate-400 block text-[11px]">${formatoMoneda(item.importe)}</span>
+                                          </div>
+                                      </div>`
+                                  )
+                                  .join('')
+                            : `<p class="text-xs text-slate-400">Aún no hay salidas registradas en los últimos 30 días.</p>`
+                    }
+                </div>
             </div>
 
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -1283,10 +1950,11 @@ async function renderVistaGlobalAdmin(container) {
                                 <th class="py-3 px-4">Producto</th>
                                 ${ranchKeys.map((k) => `<th class="py-3 px-3 text-center">${RANCH_NAMES[k]}</th>`).join('')}
                                 <th class="py-3 px-4 text-center text-emerald-800">Total Global</th>
+                                <th class="py-3 px-4 text-right">Valor Total</th>
                             </tr>
                         </thead>
                         <tbody id="tbody-global-matriz">
-                            ${filasMatriz || '<tr><td colspan="6" class="p-6 text-center text-slate-400 text-sm">Sin productos registrados aún.</td></tr>'}
+                            ${filasMatriz || '<tr><td colspan="7" class="p-6 text-center text-slate-400 text-sm">Sin productos registrados aún.</td></tr>'}
                         </tbody>
                     </table>
                 </div>

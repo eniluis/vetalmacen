@@ -13,6 +13,7 @@
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
 
 <body class="bg-slate-100 text-slate-800 antialiased select-none md:select-auto">
@@ -67,7 +68,7 @@
                         <span>📦</span> Existencias y Lotes
                     </button>
                     <button data-view="catalogo" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
-                        <span>💊</span> Alta / Catálogo
+                        <span>💊</span> Alta / Carga Masiva
                     </button>
                     <button data-view="kardex" class="nav-btn w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
                         <span>📜</span> Kardex / Historial
@@ -80,7 +81,7 @@
                         <span>🔄</span> Exportar / Sincronizar
                     </button>
                     <button data-view="global" class="nav-btn admin-only hidden w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-800 text-amber-300 font-medium">
-                        <span>🏢</span> Global 4 Ranchos
+                        <span>🏢</span> Global y Reportes
                     </button>
                 </nav>
             </div>
@@ -137,7 +138,7 @@
         </nav>
     </div>
 
-    <script type="module" src="./js/app.js?v=10"></script>
+    <script type="module" src="./js/app.js?v=11"></script>
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js');
